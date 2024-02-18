@@ -342,3 +342,188 @@ SELECT * FROM crosstab(
   Monday int, Tuesday int , Wednesday int, Thursday int, Friday int, Saturday int, Sunday int
 ) ORDER BY week;
 ```
+
+## Notes from Day 3
+
+* Cross-ref tables instead of directly connecting movies with actors
+  * Use more often? 
+
+### Scratch pad
+
+```sql
+/* Required contrib extensions */
+CREATE EXTENSION cube;
+CREATE EXTENSION dict_xsyn;
+CREATE EXTENSION fuzzystrmatch;
+CREATE EXTENSION pg_trgm;
+
+\i create_movies.sql
+\i movies_data.sql
+
+SELECT title FROM movies WHERE title ILIKE 'stardust%';
+SELECT title FROM movies WHERE title ILIKE 'stardust_%'; /* _ : any single character */
+
+SELECT COUNT(*) FROM movies WHERE title !~* '^the.*'; /*not, regex, case-insensitive */
+
+/* index strings for pattern matching (text_ because of the title type) */
+CREATE INDEX movies_title_pattern ON movies (lower(title) text_pattern_ops);
+
+SELECT levenshtein('bat', 'fads');
+
+SELECT movie_id, title FROM movies
+WHERE levenshtein(lower(title), lower('a hard day nght')) <= 3;
+
+SELECT show_trgm('Avatar');
+
+CREATE INDEX movies_title_trigram ON movies
+USING gist (title gist_trgm_ops);
+
+SELECT title FROM movies WHERE title % 'Avatre';
+
+/* full-text query operator, tsvector and tsquery */
+SELECT title FROM movies WHERE title @@ 'night & day';
+
+SELECT to_tsvector('A Hard Day''s Night'), to_tsquery('english', 'night & day');
+
+SELECT to_tsvector('english', 'A Hard Day''s Night');
+SELECT to_tsvector('simple', 'A Hard Day''s Night');
+
+\dF
+\dFd
+
+SELECT ts_lexize('english_stem', 'Day''s');
+SELECT ts_lexize('swedish_stem', 'Dagar');
+
+EXPLAIN
+SELECT * FROM movies WHERE title @@ 'night & day';
+
+/* Generalized Inverted iNdex */
+CREATE INDEX movies_title_searchable ON movies
+USING gin(to_tsvector('english', title));
+
+/* no change (!) */
+EXPLAIN
+SELECT * FROM movies WHERE title @@ 'night & day';
+
+/* explicit 'english' */
+EXPLAIN
+SELECT * FROM movies WHERE to_tsvector('english', title) @@ 'night & day';
+
+/* in vain... */
+SELECT * FROM actors WHERE name = 'Broos Wils';
+SELECT * FROM actors WHERE name % 'Broos Wils'; /* niether trigram */
+
+/* metaphones (btw... NATUAL JOIN == INNER JOIN on matching column names */
+SELECT title FROM movies NATURAL JOIN movies_actors NATURAL JOIN actors
+WHERE metaphone(name, 6) = metaphone('Broos Wils', 6);
+
+SELECT name, dmetaphone(name), dmetaphone_alt(name),metaphone(name,8),soundex(name)
+FROM actors
+LIMIT 3;
+
+/* mix and match... sound + trigram + levenshtein
+   Names that sounds the most like Robin Williams, in order
+ */
+SELECT * FROM actors
+WHERE metaphone(name, 8) % metaphone('Robin Williams', 8)
+ORDER BY levenshtein(lower('Robin Williams'), lower(name));
+
+SELECT * FROM actors WHERE dmetaphone(name) % dmetaphone('Ron'); /* not that good... */
+
+SELECT name, cube_ur_coord('(0,7,0,0,0,0,0,0,0,7,0,0,0,0,10,0,0,0)', position) AS score
+FROM genres g
+WHERE cube_ur_coord('(0,7,0,0,0,0,0,0,0,7,0,0,0,0,10,0,0,0)', position) > 0;
+
+SELECT *, cube_distance(genre, '(0,7,0,0,0,0,0,0,0,7,0,0,0,0,10,0,0,0)') dist
+FROM movies
+ORDER by dist;
+
+
+SELECT title, cube_distance(genre, '(0,7,0,0,0,0,0,0,0,7,0,0,0,0,10,0,0,0)') dist
+FROM movies
+WHERE cube_enlarge('(0,7,0,0,0,0,0,0,0,7,0,0,0,0,10,0,0,0)'::cube, 5, 18) @> genre
+ORDER BY dist;
+
+
+SELECT m.movie_id, m.title, cube_distance(m.genre, s.genre) as dist
+FROM movies m, (SELECT genre, title FROM movies WHERE title = 'Mad Max') s
+WHERE cube_enlarge(s.genre, 5, 18) @> m.genre AND s.title <> m.title
+ORDER BY cube_distance(m.genre, s.genre)
+LIMIT 10;
+
+\i recommendations.sql
+
+SELECT recommendations('Star Wars');
+SELECT recommendations(NULL,'Harrison Ford');
+SELECT recommendations('Star Wars','Harrison Ford');
+
+\i recommendations.2.sql
+
+SELECT * FROM recommendations('Blade Runner');
+SELECT * FROM recommendations('Blade Runner', 'Sylvester Stallone');
+SELECT * FROM recommendations(NULL, 'Sylvester Stallone');
+SELECT * FROM recommendations(NULL, 'Sylvester Stallone');
+
+\i create_movies_comments.sql
+
+INSERT INTO comments (created_by, movie_id, comment)
+VALUES
+  ('ulf', (SELECT movie_id FROM movies WHERE title LIKE 'Star Wars'), 'Not really sci-fi but Harrison Ford is cool'),
+  ('ulf', (SELECT movie_id FROM movies WHERE title LIKE 'First Blood'), 'Best Stallone movie'),
+  ('ulf', (SELECT movie_id FROM movies WHERE title LIKE 'Rambo III'), 'Worst Stallone movie ever'),
+  ('anon', NULL, 'I like all movies with Charlton Heston'),
+  ('anon', NULL, 'Dolph Lundgren is the best'),
+  ('ulf', NULL, 'What happened to Alicia Silverstone?'),
+  ('alicia', NULL, 'I moved on'),
+  ('ulf', (SELECT movie_id FROM movies WHERE title LIKE 'Blade Runner'), 'This is really sci-fi but Harrison Ford is a bit dull. But Stallone would be worse!');
+
+/* 👉 https://stackoverflow.com/a/46688653 */
+CREATE TEXT SEARCH DICTIONARY only_stop_words (
+    Template = pg_catalog.simple,
+    Stopwords = english
+);
+CREATE TEXT SEARCH CONFIGURATION public.only_stop_words ( COPY = pg_catalog.simple );
+ALTER TEXT SEARCH CONFIGURATION public.only_stop_words ALTER MAPPING FOR asciiword WITH only_stop_words;
+
+SELECT * from to_tsvector('english', 'Sylvester Stallone');
+SELECT * from to_tsvector('only_stop_words', 'Sylvester Stallone');
+
+SELECT name, 
+  REGEXP_REPLACE(SPLIT_PART(name, ' ', -1),'[\(\)\!]','','g') lastname
+FROM actors;
+
+SELECT name, (
+  SELECT COUNT(*)
+  FROM comments
+  WHERE to_tsvector('only_stop_words', comment) @@ to_tsquery('simple', 
+    REGEXP_REPLACE(SPLIT_PART(name, ' ', -1),'[\(\)\!]','','g')
+  )) hits
+FROM actors
+ORDER BY hits DESC;
+
+```
+
+Not a very good algorithm...
+
+```console
+                name                 | hits 
+-------------------------------------+------
+ Sage Stallone                       |    3
+ Sylvester Stallone                  |    3
+ Glenn Ford                          |    2
+ Kathleen Harrison                   |    2
+ Susan Harrison                      |    2
+ Harrison Ford                       |    2
+ George Harrison                     |    2
+ Rex Harrison                        |    2
+ Wallace Ford                        |    2
+ Charlton Heston                     |    1
+ Dolph Lundgren                      |    1
+ Alicia Silverstone                  |    1
+```
+
+Improvements:
+* Leverage full name when possible
+* "Assume" specific actor based on other comments and movies for (e.g. "Stallone")
+* What to do about all Harrisons?
+* Optimizations; pre-computed tsvectors with comment stop words?
