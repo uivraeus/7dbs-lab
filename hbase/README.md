@@ -14,7 +14,7 @@
 * What's a "good" way of loading separate ruby script files into the shell
   * General strategy for scoping?
   * Strategy for exception handling
-    (Sometimes thrown out of the entire hbase shell!) 
+    (Sometimes thrown out of the entire hbase shell!)
 
 ### Scratch pad
 
@@ -25,7 +25,7 @@ create 'wiki', 'text'
 ```
 
 > Convention (_our_) for this tale; single column within the `text` family, i.e.
-> 
+>
 > * qualifier: ""
 > * full name: "text:"
 
@@ -53,7 +53,7 @@ scan 'wiki'
 > put 'ulf', 'ulf-lab', 'text:', 'Ulf lab 3'
 > get 'ulf', 'ulf-lab', {COLUMN => 'text:', VERSIONS => 3}
 > ```
-> 
+>
 > (better)
 
 Alter schema:
@@ -124,7 +124,7 @@ ROW                              COLUMN+CELL
  Home                            column=revision:comment, timestamp=2024-02-24T11:00:59.254, value=my first edit
  Home                            column=text:, timestamp=2024-02-24T11:00:59.254, value=Hello world
 1 row(s)
-Took 0.4302 seconds                                                                                                           
+Took 0.4302 seconds
 hbase:002:0> put_many 'wiki', 'My page', { "text:" => "My text" }
 hbase:003:0> put_many 'wiki', 'My better page', { "text:" => "My text", "revision:author" => "ulf", "revision:comment" => "very nice" }
 hbase:004:0> scan 'wiki'
@@ -143,20 +143,36 @@ ROW                              COLUMN+CELL
 
 * Bug in the book's code?
   * `ts` in `Put` must be in _ms_!
+  * other issues marked with comments in my rb-files
+* Compression options?
+  * Now also "Snappy"
+  * Brief comparison in this [article](https://www.linkedin.com/pulse/importance-compression-hbase-performance-tuning-part-deshpande)
+    * GZ slower but better compression -> use for cold data
+  * (I only tested with GZ)
+  * This [documentation](https://devdoc.net/bigdata/hbase-0.98.7-hadoop1/book/regions.arch.html#Compaction) explains "StoreFiles" and compaction aspects.
+* Bloom filters
+  * Tuning considerations explained in this [article](https://www.linkedin.com/pulse/bloom-filters-hbase-kuldeep-deshpande)
+    * Few records updated at a time or in batches -> BF helps read-perf (rows in separate StoreFiles)
+    * Total storage volume increase a lot when BF are maintained
+  * Why `ROW` for `wiki` but `ROWCOL` for links?
+    * This [documentation](https://devdoc.net/bigdata/hbase-0.98.7-hadoop1/book/perf.schema.html#bloom.filters.when) explains the trade-off
+    * "large number of column-level Puts" -> `ROWCOL` (same row many/every StoreFile) - This is definitely the case for `links`!
+* Best practice for working with numerical values?
+
 
 ### Scratch pad
 
 Install bzip2 inside the hbase container
 
 ```shell
-hbase-bash 'apt update && apt install bzip2 -y' 
+hbase-bash 'apt update && apt install bzip2 -y'
 ```
 
 From `hbase shell`:
 
 ```shell
 alter 'wiki', {NAME=>'text', COMPRESSION=>'GZ',BLOOMFILTER=>'ROW'}
-``` 
+```
 
 From regular shell:
 
@@ -217,7 +233,7 @@ Stop at 400000 entries (pages):
 ```
 
 ```console
-root@3d7ff9acd747:~/tmp/hbase# du -h -d 1 
+root@3d7ff9acd747:~/tmp/hbase# du -h -d 1
 84K     ./WALs
 4.0K    ./corrupt
 168K    ./MasterData
@@ -270,7 +286,118 @@ Cross references
 create 'links', {NAME => 'to', VERSIONS => 1, BLOOMFILTER => 'ROWCOL'}, {NAME => 'from', VERSIONS => 1, BLOOMFILTER => 'ROWCOL' }
 ```
 
+Running script to detect and store all from/to links
 
+```shell
+hbase-bash "cat /workspace/lab/hbase/generate_wiki_links.rb | hbase shell -n"
+```
+
+```console
+1 pages processed (! (disambiguation))
+2 pages processed (!!!)
+
+200000 pages processed (List of Nintendo Entertainment System games)
+200500 pages processed (List of Test cricket records)
+Unhandled Java exception: java.lang.IllegalArgumentException: Row length is 0
+java.lang.IllegalArgumentException: Row length is 0
+                  checkRow at org/apache/hadoop/hbase/client/Mutation.java:702
+                    <init> at org/apache/hadoop/hbase/client/Put.java:94
+                    <init> at org/apache/hadoop/hbase/client/Put.java:59
+                    <init> at org/apache/hadoop/hbase/client/Put.java:50
+               newInstance at java/lang/reflect/Constructor.java:423
+         newInstanceDirect at org/jruby/javasupport/JavaConstructor.java:253
+               newInstance at org/jruby/RubyClass.java:939
+ :
+ :
+```
+
+Some debugging -> `target`=`" "` got stripped to `""` ... maybe the regex pattern is wrong? Don't care, just add guard for this and rerun.
+
+> ***Side note***
+>
+> During imports the `archive` directory gets quite big. Even when the script has ended its size is quite large:
+>
+> ```console
+> root@3d7ff9acd747:~/tmp/hbase# du -h -d 1
+> 40K     ./WALs
+> 4.0K    ./corrupt
+> 144K    ./MasterData
+> 4.9G    ./archive
+> 4.0K    ./.hbck
+> 1.9M    ./oldWALs
+> 8.0K    ./.tmp
+> 4.8G    ./data
+> 4.0K    ./staging
+> 4.0K    ./mobdir
+> 9.6G    .
+> ```
+>
+> After a while, the `archive` directory has been (partly) emptied:
+>
+> ```console
+> root@3d7ff9acd747:~/tmp/hbase# du -h -d 1
+> 40K     ./WALs
+> 4.0K    ./corrupt
+> 144K    ./MasterData
+> 792M    ./archive
+> 4.0K    ./.hbck
+> 1.9M    ./oldWALs
+> 8.0K    ./.tmp
+> 4.8G    ./data
+> 4.0K    ./staging
+> 4.0K    ./mobdir
+> 5.6G    .
+> ```
+
+Examine result of links-creation
+
+```shell
+scan 'links', STARTROW => 'A Plea for Captain John Brown', ENDROW => 'A Scandal in Bohemia'
+```
+
+```console
+ :
+A Saucerful of Secrets                             column=to:vibraphone, timestamp=...
+A Saucerful of Secrets                             column=to:xylophone, timestamp=...
+A Saucerful of Secrets (instrumental)              column=from:A Saucerful of Secrets, timestamp=...
+A Saucerful of Secrets (instrumental)              column=from:Concertgebouw, Amsterdam, timestamp=...
+A Saucerful of Secrets (instrumental)              column=from:Ummagumma, timestamp=...
+A Saucerful of Secrets (instrumental)              column=to:A Momentary Lapse of Reason Tour, timestamp=...
+A Saucerful of Secrets (instrumental)              column=to:A Saucerful of Secrets, timestamp=...
+A Saucerful of Secrets (instrumental)              column=to:ABC-CLIO, timestamp=...
+A Saucerful of Secrets (instrumental)              column=to:Abbey Road Studios, timestamp=...
+ :
+```
+
+```shell
+get 'links', 'A Saucerful of Secrets'
+```
+
+```shell
+count 'links', INTERVAL => 100000, CACHE => 10000
+```
+
+```console
+ :
+Current count: 4600000, row: international standards
+Current count: 4700000, row: public penance
+Current count: 4800000, row: white-supremacists
+4822925 row(s)
+Took 28.2686 seconds
+=> 4822925
+```
+
+```shell
+count 'links', INTERVAL => 100000, CACHE => 50000
+```
+
+```console
+ :
+Took 26.4212 seconds
+=> 4822925
+```
+
+(A _lot_ slower with CACHE => 10)
 
 Summary of all create/configure commands; restart with fresh wiki (very useful during debugging)
 
@@ -288,3 +415,72 @@ disable 'links'
 drop 'links'
 create 'links', {NAME => 'to', VERSIONS => 1, BLOOMFILTER => 'ROWCOL'}, {NAME => 'from', VERSIONS => 1, BLOOMFILTER => 'ROWCOL' }
 ```
+
+### Homework
+
+Downloaded Food_Display_Table.xml from "https://data.world/fns/mypyramid-food-raw-data" (after registering an account)
+
+Create table `foods` with Display Name as the row key (and single column family `facts`).
+
+* Use BF with `ROWCOL` (multiple Puts)
+* Compression? Each facts is very short/compact... worth it?
+  * Trying without
+* Versions?
+  * Use 1, not expecting the need for a history
+
+```shell
+create 'foods', {NAME => 'facts', VERSIONS => 1, BLOOMFILTER => 'ROWCOL'}
+```
+
+```shell
+hbase-bash 'cat /workspace/lab/hbase/Food_Display_Table.xml | hbase shell /workspace/lab/hbase/import_food_data.rb'
+```
+
+> After debug iterations: Reset table
+>
+> ```shell
+> truncate 'foods'
+> ```
+
+The dataset is a bit ambiguous as there are multiple entries with same Display_Name and Food_Code, but with different values for the same "fact keys", e.g. "Kix cereal"
+
+```console
+-> {"Food_Code"=>"57303100", "Display_Name"=>"Kix cereal", "Portion_Default"=>"1.00000", "Portion_Amount"=>"1.00000", "Portion_Display_Name"=>"cup", "Factor"=>"1.00000", "Increment"=>".25000", "Multiplier"=>".25000", "Grains"=>".67804", "Whole_Grains"=>".23782", "Vegetables"=>".00000", "Orange_Vegetables"=>".00000", "Drkgreen_Vegetables"=>".00000", "Starchy_vegetables"=>".00000", "Other_Vegetables"=>".00000", "Fruits"=>".00000", "Milk"=>".00000", "Meats"=>".00000", "Soy"=>".00000", "Drybeans_Peas"=>".00000", "Oils"=>".00000", "Solid_Fats"=>".00000", "Added_Sugars"=>"8.93255", "Alcohol"=>".00000", "Calories"=>"82.94000", "Saturated_Fats"=>".11000"}
+---
+-> {"Food_Code"=>"57303100", "Display_Name"=>"Kix cereal", "Portion_Default"=>"2.00000", "Portion_Amount"=>"1.00000", "Portion_Display_Name"=>"single serving box", "Factor"=>"1.00000", "Increment"=>".50000", "Multiplier"=>".50000", "Grains"=>".55476", "Whole_Grains"=>".19458", "Vegetables"=>".00000", "Orange_Vegetables"=>".00000", "Drkgreen_Vegetables"=>".00000", "Starchy_vegetables"=>".00000", "Other_Vegetables"=>".00000", "Fruits"=>".00000", "Milk"=>".00000", "Meats"=>".00000", "Soy"=>".00000", "Drybeans_Peas"=>".00000", "Oils"=>".00000", "Solid_Fats"=>".00000", "Added_Sugars"=>"7.30845", "Alcohol"=>".00000", "Calories"=>"67.86000", "Saturated_Fats"=>".09000"}
+---
+```
+
+```console
+hbase:004:0> get 'foods', 'Kix cereal'
+COLUMN                    CELL
+ facts:Added_Sugars       timestamp=2024-03-01T05:38:20.176, value=7.30845
+ facts:Alcohol            timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Calories           timestamp=2024-03-01T05:38:20.176, value=67.86000
+ facts:Drkgreen_Vegetable timestamp=2024-03-01T05:38:20.176, value=.00000
+ s
+ facts:Drybeans_Peas      timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Factor             timestamp=2024-03-01T05:38:20.176, value=1.00000
+ facts:Food_Code          timestamp=2024-03-01T05:38:20.176, value=57303100
+ facts:Fruits             timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Grains             timestamp=2024-03-01T05:38:20.176, value=.55476
+ facts:Increment          timestamp=2024-03-01T05:38:20.176, value=.50000
+ facts:Meats              timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Milk               timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Multiplier         timestamp=2024-03-01T05:38:20.176, value=.50000
+ facts:Oils               timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Orange_Vegetables  timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Other_Vegetables   timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Portion_Amount     timestamp=2024-03-01T05:38:20.176, value=1.00000
+ facts:Portion_Default    timestamp=2024-03-01T05:38:20.176, value=2.00000
+ facts:Portion_Display_Na timestamp=2024-03-01T05:38:20.176, value=single serving box
+ me
+ facts:Saturated_Fats     timestamp=2024-03-01T05:38:20.176, value=.09000
+ facts:Solid_Fats         timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Soy                timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Starchy_vegetables timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Vegetables         timestamp=2024-03-01T05:38:20.176, value=.00000
+ facts:Whole_Grains       timestamp=2024-03-01T05:38:20.176, value=.19458
+1 row(s)
+```
+
