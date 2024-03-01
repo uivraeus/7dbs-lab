@@ -422,7 +422,8 @@ Downloaded Food_Display_Table.xml from "https://data.world/fns/mypyramid-food-ra
 
 Create table `foods` with Display Name as the row key (and single column family `facts`).
 
-* Use BF with `ROWCOL` (multiple Puts)
+* Use BF with `ROWCOL`
+  * Probably wrong decision... anticipated many small Puts but I only perform 1 per row
 * Compression? Each facts is very short/compact... worth it?
   * Trying without
 * Versions?
@@ -442,7 +443,7 @@ hbase-bash 'cat /workspace/lab/hbase/Food_Display_Table.xml | hbase shell /works
 > truncate 'foods'
 > ```
 
-The dataset is a bit ambiguous as there are multiple entries with same Display_Name and Food_Code, but with different values for the same "fact keys", e.g. "Kix cereal"
+The dataset is a bit ambiguous as there are multiple entries with same Display_Name and Food_Code, but with different values for the same "fact keys", e.g. "Kix cereal". Maybe `Portion_Display_Name` should have been part of the row key as well. Right now only the last update of similar rows remains.
 
 ```console
 -> {"Food_Code"=>"57303100", "Display_Name"=>"Kix cereal", "Portion_Default"=>"1.00000", "Portion_Amount"=>"1.00000", "Portion_Display_Name"=>"cup", "Factor"=>"1.00000", "Increment"=>".25000", "Multiplier"=>".25000", "Grains"=>".67804", "Whole_Grains"=>".23782", "Vegetables"=>".00000", "Orange_Vegetables"=>".00000", "Drkgreen_Vegetables"=>".00000", "Starchy_vegetables"=>".00000", "Other_Vegetables"=>".00000", "Fruits"=>".00000", "Milk"=>".00000", "Meats"=>".00000", "Soy"=>".00000", "Drybeans_Peas"=>".00000", "Oils"=>".00000", "Solid_Fats"=>".00000", "Added_Sugars"=>"8.93255", "Alcohol"=>".00000", "Calories"=>"82.94000", "Saturated_Fats"=>".11000"}
