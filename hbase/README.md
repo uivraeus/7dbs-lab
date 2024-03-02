@@ -158,7 +158,13 @@ ROW                              COLUMN+CELL
     * This [documentation](https://devdoc.net/bigdata/hbase-0.98.7-hadoop1/book/perf.schema.html#bloom.filters.when) explains the trade-off
     * "large number of column-level Puts" -> `ROWCOL` (same row many/every StoreFile) - This is definitely the case for `links`!
 * Best practice for working with numerical values?
-
+* [shell docs](https://hbase.apache.org/book.html#shell)
+  * which also includes descriptions of the [conceptual](https://hbase.apache.org/book.html#conceptual.view) and [physical](https://hbase.apache.org/book.html#physical.view) data model.
+* The [Learning HBase](https://subscription.packtpub.com/book/data/9781783985944/pref06) book helps understanding the relation between HBase and other parts of the Hadoop ecosystem. (Maybe a bit outdated?), e.g.
+  * [HBase layout on top of Hadoop](https://subscription.packtpub.com/book/data/9781783985944/1/ch01lvl1sec08/hbase-layout-on-top-of-hadoop)
+  * [HBase in the Hadoop ecosystem](https://subscription.packtpub.com/book/data/9781783985944/1/ch01lvl1sec11/hbase-in-the-hadoop-ecosystem)
+  * [Getting started with HBase](https://subscription.packtpub.com/book/data/9781783985944/1/ch01lvl1sec14/getting-started-with-hbase), describes the roles of all components.
+* [Regions documentation](https://hbase.apache.org/book.html#regions.arch) explains the details around storage.
 
 ### Scratch pad
 
@@ -423,7 +429,9 @@ Downloaded Food_Display_Table.xml from "https://data.world/fns/mypyramid-food-ra
 Create table `foods` with Display Name as the row key (and single column family `facts`).
 
 * Use BF with `ROWCOL`
-  * Probably wrong decision... anticipated many small Puts but I only perform 1 per row
+  * Probably wrong decision... better w/o BF? Many column-level Puts but all rows have all columns (not sparse)
+    * Need to understand the _StoreFile_ concept better!
+  * According to [some docs](https://devdoc.net/bigdata/hbase-0.98.7-hadoop1/book/perf.schema.html#bloom.filters.when) _"Bloom filters work best when the size of each data entry is at least a few kilobytes in size"_ - which is not the case here
 * Compression? Each facts is very short/compact... worth it?
   * Trying without
 * Versions?
@@ -485,3 +493,52 @@ COLUMN                    CELL
 1 row(s)
 ```
 
+Queries / specific column / intervals
+
+
+```shell
+get 'foods', 'Kix cereal', { COLUMN => 'facts:Saturated_Fats' }
+get 'foods', 'Kix cereal', COLUMN => 'facts:Saturated_Fats'
+
+scan 'foods', { COLUMN => 'facts:Saturated_Fats' }
+scan 'foods', COLUMN => 'facts:Saturated_Fats'
+
+scan 'foods', { COLUMN => 'facts:Saturated_Fats', STARTROW => 'W', ENDROW => 'X' }
+scan 'foods', COLUMN => 'facts:Saturated_Fats', STARTROW => 'W', ENDROW => 'X'
+```
+
+### Extra experiments
+
+```shell
+create 'ulf', {NAME => 'cf-a', VERSIONS => 3}, {NAME => 'cf-b', VERSIONS => 2}
+put 'ulf', 'row-x', 'cf-a:', 'update-row-x--cf-a-1'
+put 'ulf', 'row-x', 'cf-a:q-a', 'update-row-x--cf-a-q-a-1'
+put 'ulf', 'row-x', 'cf-a:q-b', 'update-row-x--cf-a-q-b-1'
+put 'ulf', 'row-x', 'cf-a:q-a', 'update-row-x--cf-a-q-a-2'
+put 'ulf', 'row-x', 'cf-a:', 'update-row-x--cf-a-2'
+
+put 'ulf', 'row-y', 'cf-a:q-a', 'update-row-y--cf-a-q-a-1'
+
+put 'ulf', 'row-z', 'cf-a:q-b', 'update-row-z--cf-a-q-b-1'
+```
+
+```console
+hbase:025:0> scan 'ulf', COLUMN=>'cf-a:q-b'
+ROW          COLUMN+CELL
+ row-x       column=cf-a:q-b, timestamp=2024-03-02T05:48:03.168, value=update-row-x--cf-a-q-b-1
+ row-z       column=cf-a:q-b, timestamp=2024-03-02T05:48:03.341, value=update-row-z--cf-a-q-b-1
+2 row(s)
+
+hbase:026:0> scan 'ulf', COLUMN=>'cf-a:q-a'
+ROW          COLUMN+CELL
+ row-x       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.206, value=update-row-x--cf-a-q-a-2
+ row-y       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.291, value=update-row-y--cf-a-q-a-1
+2 row(s)
+
+hbase:027:0> scan 'ulf', COLUMN=>'cf-a:q-a', VERSIONS=>2
+ROW          COLUMN+CELL
+ row-x       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.206, value=update-row-x--cf-a-q-a-2
+ row-x       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.135, value=update-row-x--cf-a-q-a-1
+ row-y       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.291, value=update-row-y--cf-a-q-a-1
+2 row(s)
+```
