@@ -505,7 +505,41 @@ scan 'foods', COLUMN => 'facts:Saturated_Fats'
 
 scan 'foods', { COLUMN => 'facts:Saturated_Fats', STARTROW => 'W', ENDROW => 'X' }
 scan 'foods', COLUMN => 'facts:Saturated_Fats', STARTROW => 'W', ENDROW => 'X'
+
+scan 'foods', {FILTER => "RowFilter(=, 'regexstring:cereal')", COLUMN => 'facts:Saturated_Fats'}
+scan 'foods', {FILTER => "RowFilter = (=, 'substring:cereal')", COLUMN => 'facts:Saturated_Fats'}
+
+scan 'foods', {FILTER => "RowFilter = (!=, 'substring:cereal')", COLUMN => 'facts:Saturated_Fats'}
+
+
+import org.apache.hadoop.hbase.filter.CompareFilter
+import org.apache.hadoop.hbase.filter.SingleColumnValueFilter
+import org.apache.hadoop.hbase.util.Bytes
+scan 'foods', {FILTER => SingleColumnValueFilter.new(Bytes.toBytes('facts'), Bytes.toBytes('Saturated_Fats'), CompareFilter::CompareOp.valueOf('EQUAL'), Bytes.toBytes('.00000')), COLUMN => 'facts:Saturated_Fats' }
+
+scan 'foods', { FILTER => "SingleColumnValueFilter = ('facts','Saturated_Fats',=,'binary:.00000')", COLUMN => 'facts:Saturated_Fats' }
+scan 'foods', FILTER => "SingleColumnValueFilter = ('facts','Saturated_Fats',=,'binary:.00000')", COLUMN => 'facts:Saturated_Fats'
+
+scan 'foods', FILTER => "RowFilter = (=, 'substring:Fruit') AND SingleColumnValueFilter = ('facts','Saturated_Fats',=,'binary:.00000')", COLUMNS => ['facts:Fruits','facts:Saturated_Fats']
+
+scan 'foods', FILTER => "SingleColumnValueFilter = ('facts','Fruits',>,'binary:.50000')", COLUMN => 'facts:Fruits'
+scan 'foods', FILTER => "SingleColumnValueFilter = ('facts','Fruits',<,'binary:.50000')", COLUMN => 'facts:Fruits'
+
+count 'foods', FILTER => "SingleColumnValueFilter = ('facts','Fruits',>,'binary:.50000')", COLUMN => 'facts:Fruits'
+count 'foods', FILTER => "SingleColumnValueFilter = ('facts','Fruits',<=,'binary:.50000')", COLUMN => 'facts:Fruits'
+count 'foods'
+
 ```
+
+! `>`, `<=` and `<` above worked... why/how?
+
+Tricky! - this is not how you do it...
+(attempt to output just Fruits-column but filter on another - won't work -> SingleColumnValueFilter has no effect)
+
+```shell
+scan 'foods', FILTER => "RowFilter = (=, 'substring:Fruit') AND SingleColumnValueFilter = ('facts','Saturated_Fats',=,'binary:.00000')", COLUMNS => ['facts:Fruits']
+```
+
 
 ### Extra experiments
 
