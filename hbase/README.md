@@ -576,3 +576,234 @@ ROW          COLUMN+CELL
  row-y       column=cf-a:q-a, timestamp=2024-03-02T05:48:03.291, value=update-row-y--cf-a-q-a-1
 2 row(s)
 ```
+
+## Notes from Day 3
+
+* Quite easy to setup a cluster
+  * A bit harder to anticipate the costs for it (but there are guides and tables that are (kind of) accurate)
+* EMR is so much more than HBase!
+  * How much is HBase used by "regular" EMR users?
+  * Was this way of using/accessing EMR representative for actual users?
+* Resizing the cluster merges/splits regions to fit the number of "core" ("region") servers
+* I don't think HDFS has used in by EMR cluster... would it have been better/different?
+
+### Scratch pad
+
+```shell
+aws configure
+```
+
+```shell
+aws emr create-default-roles
+```
+
+```shell
+aws ec2 create-key-pair --key-name HBaseShell --query 'KeyMaterial' --output text > ~/.ssh/hbase-shell-key.pem
+chmod 400 ~/.ssh/hbase-shell-key.pem 
+aws ec2 describe-key-pairs
+```
+
+```shell
+aws emr create-cluster \
+  --name "Seven DBs example cluster" \
+  --release-label emr-5.36.1 \
+  --ec2-attributes KeyName=HBaseShell \
+  --use-default-roles \
+  --instance-type m5.xlarge \
+  --instance-count 3 \
+  --applications Name=HBase
+```
+
+> ***EMR release***
+>
+> The book states `5.3.1`, but I get this error:
+>
+> ```console
+> An error occurred (ValidationException) when calling the RunJobFlow operation: The supplied release label is invalid: emr-5.3.1.
+> ```
+>
+> From the [Release Guide](https://docs.aws.amazon.com/emr/latest/ReleaseGuide/emr-release-components.html):
+>
+>> Latest release details, including application versions, release notes, components, and configuration classifications of Amazon EMR 7.x, 6.x, and 5.x series:
+>>
+>> * Amazon EMR Release 7.0.0
+>> * Amazon EMR Release 6.15.0
+>> * Amazon EMR Release 5.36.1
+>
+> Better to use `5.36.1`? Or `6` or `7`?
+
+> ***Instance type***
+>
+> The book states `m1.large` but I get this error:
+>
+> ```console
+> An error occurred (ValidationException) when calling the RunJobFlow operation: Instance type 'ml.large' is not supported.
+> ```
+>
+> According to the [AWS docs](https://docs.aws.amazon.com/emr/latest/ManagementGuide/emr-supported-instance-types.html) there are "millions" of other options (when looking at `eu-north-1`)
+>
+> I just picked the "smallest": `m5.xlarge`
+
+Output:
+
+```console
+{
+    "ClusterId": "j-14YLJPZ1JWJV",
+    "ClusterArn": "arn:aws:elasticmapreduce:eu-north-1:381492275350:cluster/j-14YLJPZ1JWJV"
+}
+
+$ aws emr list-clusters
+{
+    "Clusters": [
+        :
+        :
+    ]
+}
+```
+
+```shell
+export CLUSTER_ID=j-14YLJPZ1JWJV
+```
+
+```shell
+aws emr describe-cluster --cluster-id ${CLUSTER_ID:?} --query Cluster.Status.State
+```
+
+(Wait until `"WAITING"`)
+
+```shell
+aws emr list-instances  --cluster-id ${CLUSTER_ID:?}
+```
+
+```shell
+aws emr  describe-cluster --cluster-id ${CLUSTER_ID:?} --query Cluster.Ec2InstanceAttributes.EmrManagedMasterSecurityGroup
+```
+
+```shell
+export SECURITY_GROUP_ID=sg-...
+```
+
+```shell
+export MY_CIDR=$(curl -s ifconfig.me)/32
+```
+
+```shell
+aws ec2 authorize-security-group-ingress \
+  --group-id ${SECURITY_GROUP_ID:?} \
+  --protocol tcp \
+  --port 22 \
+  --cidr ${MY_CIDR:?}
+```
+
+```shell
+aws emr ssh --cluster-id ${CLUSTER_ID:?} --key-pair-file ~/.ssh/hbase-shell-key.pem
+```
+
+Enter `hbase shell`:
+
+```console
+[hadoop@ip-172-31-31-207 ~]$ hbase shell
+log4j:ERROR setFile(null,true) call failed.
+java.io.FileNotFoundException: /var/log/hbase/hbase.log (Permission denied)
+        at java.io.FileOutputStream.open0(Native Method)
+ :
+ :
+        at org.jruby.Main.main(Main.java:188)
+log4j:ERROR Either File or DatePattern options are not set for appender [DRFA].
+log4j:ERROR setFile(null,true) call failed.
+java.io.FileNotFoundException: /var/log/hbase/SecurityAuth.audit (Permission denied)
+        at java.io.FileOutputStream.open0(Native Method)
+  :
+  :
+        at org.jruby.Main.run(Main.java:208)
+        at org.jruby.Main.main(Main.java:188)
+log4j:ERROR Either File or DatePattern options are not set for appender [DRFAS].
+HBase Shell
+Use "help" to get list of supported commands.
+Use "exit" to quit this interactive shell.
+Version 1.4.13, rUnknown, Wed Aug 17 17:33:54 UTC 2022
+
+hbase(main):001:0> version
+1.4.13, rUnknown, Wed Aug 17 17:33:54 UTC 2022
+
+hbase(main):002:0> status
+1 active master, 0 backup masters, 2 servers, 0 dead, 1.0000 average load
+```
+
+> ***Hmmm...***
+>
+> Despite the exceptions I ended up in the shell... but will it work?
+>
+> Also, the version is `1.4.13` ... maybe I'll want to try a newer EMR release to get what I used locally.
+
+
+```shell
+create 'messages', 'text'
+put 'messages', 'arrival', 'text:', 'HBase: now on AWS!'
+get 'messages', 'arrival'
+```
+
+Tear down (re-create for the homework)
+
+```shell
+aws emr terminate-clusters --cluster-ids ${CLUSTER_ID:?}
+```
+
+```console
+$ aws emr describe-cluster --cluster-id ${CLUSTER_ID:?} --query Cluster.Status.State
+"TERMINATING"
+$ aws emr describe-cluster --cluster-id ${CLUSTER_ID:?} --query Cluster.Status.State
+"TERMINATED"
+```
+
+The cluster still "exists" (I think):
+
+```console
+$ aws emr list-clusters
+{
+    "Clusters": [
+        {
+            "Id": "j-14YLJPZ1JWJV",
+            "Name": "Seven DBs example cluster",
+            "Status": {
+:            
+        "Timeline": {
+                    "CreationDateTime": "2024-03-02T16:26:57.574000+00:00",
+                    "ReadyDateTime": "2024-03-02T16:34:01.434000+00:00",
+                    "EndDateTime": "2024-03-02T16:57:55.341000+00:00"
+                }
+            },
+      "NormalizedInstanceHours": 24,
+ :
+```
+
+> ***Cloud Cost***
+>
+> The cluster existed for roughly 30 minutes ("ready" for ~20). What does `NormalizedInstanceHours: 24` imply?
+>
+> From [Amazon EMR pricing](https://aws.amazon.com/emr/pricing/):
+>>
+>> _"EMR pricing is simple and predictable: you pay a per-second rate for every second you use, with a one-minute minimum. A 10-node cluster running for 10 hours costs the same as a 100-node cluster running for one hour."_
+>>
+>> ***Amazon EMR on Amazon EC2***
+>>
+>> _"The Amazon EMR price is added to the Amazon EC2 price (the price for the underlying servers) [...] also billed per-second, with a one-minute minimum"_
+>>
+>> Cost table: (For `eu-north-1`, On Demand) `m5.xlarge`:	_$0.204_ per hour
+>>
+> What are normalized instance hours in EMR? From the [EMR FAQ](https://aws.amazon.com/emr/faqs):
+>
+>> _"Normalized Instance Hours are hours of compute time based on the standard of 1 hour of m1.small usage = 1 hour normalized compute time."_
+>
+> From [another User Guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/apply_ri.html) I see that `xlarge` has a "Normalization factor" of 8. But what about `m1` vs `m5`?
+>
+> I ran a 3 node cluster (3x8=24), but only for 20-30 minutes which indicates some additional factor in the range of 2-3.
+>
+> An [external Vantage site](https://instances.vantage.sh/) shows that `m1.small` has 1 [vCPU/1GB](https://instances.vantage.sh/aws/ec2/m1.small?selected=m1.small&region=eu-north-1&os=linux&cost_duration=hourly&reserved_term=Standard.noUpfront) while `m5.xlarge` has [4 vCPU/16GB](https://instances.vantage.sh/aws/ec2/m5.xlarge?selected=m1.small&region=eu-north-1&os=linux&cost_duration=hourly&reserved_term=Standard.noUpfront). But as `m1.small` is not available in `eu-north-1` there is not price comparison.
+>
+>
+> _Conclusion:_ None - Hard to tell if/how the "normalized instance hours" information should be used. 
+
+***Homework***
+
+See [separate notes](./emr-compare.md) for some comparison of loading the `wiki` table into EMR compared to running locally.
