@@ -1,0 +1,15 @@
+{
+  "name": "external-app",
+  "version": "1.0.0",
+  "description": "Homework of MongoDB chapter",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "mongodb": "^6.4.0"
+  }
+}
