@@ -381,3 +381,292 @@ The queries can also be run from non-JS, e.g. Python, as in the [external-python
 cd external-python-app
 python main.py
 ```
+
+## Notes from Day 2
+
+* Map-Reduce is deprecated according to the [docs](https://www.mongodb.com/docs/manual/core/map-reduce/)
+  > _"Starting in MongoDB 5.0, map-reduce is deprecated [...] Instead of map-reduce, you should use an aggregation pipeline"_
+
+  (I'm testing with v7.0)
+ 
+### Scratch pad
+
+```js
+load('./populatePhones.js')
+populatePhones(800, 5550000, 5650000)
+db.phones.find().limit(2)
+```
+
+```js
+db.getCollectionNames().forEach(collection => {
+  print(`Indexes for the ${collection} collection:`)
+  printjson(db[collection].getIndexes())
+})
+```
+
+```js
+db.phones.find({display: "+1 800-5650001"}).explain("executionStats").executionStats
+```
+
+```console
+{
+  executionSuccess: true,
+  nReturned: 0,
+  executionTimeMillis: 47,
+  totalKeysExamined: 0,
+  totalDocsExamined: 100000,
+  executionStages: {
+    stage: 'COLLSCAN',
+    filter: { display: { '$eq': '+1 800-5650001' } },
+    nReturned: 0,
+    executionTimeMillisEstimate: 5,
+    works: 100001,
+    advanced: 0,
+    needTime: 100000,
+    needYield: 0,
+    saveState: 100,
+    restoreState: 100,
+    isEOF: 1,
+    direction: 'forward',
+    docsExamined: 100000
+  }
+}
+```
+
+```js
+db.phones.ensureIndex(
+  { display: 1 },
+  { unique: true, dropDups: true }
+)
+db.phones.getIndexes()
+```
+
+```console
+[
+  { v: 2, key: { _id: 1 }, name: '_id_' },
+  { v: 2, key: { display: 1 }, name: 'display_1', unique: true }
+]
+```
+
+```js
+db.phones.find({display: "+1 800-5650001"}).explain("executionStats").executionStats
+```
+
+```console
+{
+  executionSuccess: true,
+  nReturned: 0,
+  executionTimeMillis: 2,
+  totalKeysExamined: 0,
+  totalDocsExamined: 0,
+  executionStages: {
+    stage: 'FETCH',
+    nReturned: 0,
+    executionTimeMillisEstimate: 0,
+    works: 1,
+    advanced: 0,
+    needTime: 0,
+    needYield: 0,
+    saveState: 0,
+    restoreState: 0,
+    isEOF: 1,
+    docsExamined: 0,
+    alreadyHasObj: 0,
+    inputStage: {
+      stage: 'IXSCAN',
+      nReturned: 0,
+      executionTimeMillisEstimate: 0,
+      works: 1,
+      advanced: 0,
+      needTime: 0,
+      needYield: 0,
+      saveState: 0,
+      restoreState: 0,
+      isEOF: 1,
+      keyPattern: { display: 1 },
+      indexName: 'display_1',
+      isMultiKey: false,
+      multiKeyPaths: { display: [] },
+      isUnique: true,
+      isSparse: false,
+      isPartial: false,
+      indexVersion: 2,
+      direction: 'forward',
+      indexBounds: { display: [ '["+1 800-5650001", "+1 800-5650001"]' ] },
+      keysExamined: 0,
+      seeks: 1,
+      dupsTested: 0,
+      dupsDropped: 0
+    }
+  }
+}
+```
+
+```js
+db.setProfilingLevel(2)
+db.phones.find({display: "+1 800-5650001"})
+db.system.profile.find()
+db.setProfilingLevel(0)
+```
+
+```js
+db.phones.ensureIndex({ 'components.area': 1 }, { background: 1 })
+db.phones.getIndexes()
+```
+
+```js
+db.phones.countDocuments({ 'components.number': { $gt: 5599999 }})
+db.phones.distinct('components.number' ,{ 'components.number': { $lt: 5550005 }})
+```
+
+> ***Out  our memory***
+>
+> ```js
+> load('./mongoCities100000.js')
+> ```
+>> ```console
+>> FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+>> ```
+>
+> Restart _mongosh_ with tweaked settings according to [this article](https://www.mongodb.com/community/forums/t/how-to-increase-memory-with-mongosh/154079)
+>
+> ```shell
+> env NODE_OPTIONS='--max-old-space-size=4096' mongosh book
+> ``` 
+
+```js
+load('./mongoCities100000.js')
+db.cities.countDocuments()
+```
+
+> ***Gated updates?***
+>
+> While running the script, which takes several minutes, `db.cities.countDocuments()` returns `0` in a parallel _mongosh_ shell. Eventually it starts returning (increasing) non-zero values. After the script has completed, it returns `99838`
+
+```js
+db.cities.aggregate([
+  {
+    $match: {
+      'timezone': {
+        $eq: 'Europe/London'
+      }
+    }
+  },
+  {
+    $group: {
+      _id: 'averagePopulation',
+      avgPop: {
+        $avg: '$population'
+      }
+    }
+  }
+])
+
+db.cities.aggregate([
+  {
+    $match: {
+      'timezone': {
+        $eq: 'Europe/London'
+      }
+    }
+  },
+  {
+    $sort: {
+      population: -1
+    }
+  },
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      population: 1
+    }
+  }
+])
+
+db.cities.aggregate([
+  {
+    $match: {
+      'timezone': {
+        $regex: 'Europe/'
+      }
+    }
+  },
+  {
+    $group: {
+      _id: '$country',
+      avgPop: {
+        $avg: '$population'
+      }
+    }
+  },
+  {
+    $sort: {
+      avgPop: -1
+    }
+  }
+])
+```
+
+```js
+db.cities.drop()
+```
+
+```js
+use admin
+db.runCommand('top')
+use book
+db.listCommands()
+```
+
+```js
+db.runCommand({ 'find': 'someCollection' })
+```
+
+```js
+load('./distinctDigits.js')
+```
+
+```js
+load('map1.js')
+load('reduce1.js')
+results = db.runCommand({
+  mapReduce: 'phones',
+  map: map,
+  reduce: reduce,
+  out: 'phones.report'
+})
+db.phones.report.find({ '_id.country': 8 })
+```
+
+> _Just a naming convention or any (underlying technical) relation between collections `phones` and `phones.report`?_
+>
+> - just naming I suppose
+
+### Homework
+
+* Admin command shortcut: [`db.adminCommand()`](https://www.mong(odb.com/docs/manual/reference/method/db.adminCommand/)
+* Description of [cursors](https://www.mongodb.com/docs/v7.0/tutorial/iterate-a-cursor/)
+* Description of [Map-Reduce](https://www.mongodb.com/docs/manual/core/map-reduce/)
+  * Good [answer to question](https://dba.stackexchange.com/a/310478) on Stack Overflow regarding deprecation, including discouraged usage of js-functions on the server. 
+
+#### Finalize
+
+```js
+load('map1.js')
+load('reduce1.js')
+load('./final1.js')
+results = db.runCommand({
+  mapReduce: 'phones',
+  map: map,
+  reduce: reduce,
+  finalize: finalize,
+  out: 'phones.report'
+})
+db.phones.report.find({ '_id.country': 8 }).limit(3)
+```
+
+#### Drivers of languages
+
+See [external-app](./external-app/index.js) for NodeJS example, or [external-python-app](./external-python-app/main.py) for a Python variant.
+

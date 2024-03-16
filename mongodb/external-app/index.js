@@ -10,12 +10,34 @@ const client = new MongoClient(uri,  {
         }
     }
 );
+const db = client.db(); //no arg -> use db from connection string
+const articles = db.collection('articles')
+  
+
+async function addBlogEntry(author, email, text) {
+  const result = await articles.insertOne({
+    author,
+    email,
+    createdAt: new Date(),
+    text
+  })
+
+  console.log(`Added article, result: ${JSON.stringify(result, null, 2)}`)
+  if (result.acknowledged && result.insertedId) {
+    return result.insertedId
+  } else {
+    return null
+  }
+}
+
+async function addAuthorIndex() {
+  //https://mongodb.github.io/node-mongodb-native/6.5/classes/Collection.html#createIndex
+  const result = await articles.createIndex('author')
+
+  console.log(`Added author index, result: ${JSON.stringify(result, null, 2)}`)
+}
 
 async function queryBlog(author) {
-  const options = { _id: false };
-  const db = client.db(); //no arg -> use db from connection string
-  const articles = db.collection('articles')
-  
   const numArticles = await articles.countDocuments()
   const queriedArticles = articles.find({ author })
   
@@ -28,6 +50,16 @@ async function queryBlog(author) {
   }
 }
 
+async function addComment(articleId, commenter, comment) {
+  const result = await articles.updateOne({ _id: articleId }, {
+    $push: { comments:
+      { author: commenter, text: comment }
+    }
+  })
+
+  console.log(`Added comment, result: ${JSON.stringify(result, null, 2)}`)
+}
+
 async function run() {
   try {
     // Connect the client to the server (optional starting in v4.7)
@@ -35,6 +67,20 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");
+
+    await queryBlog('ulf')
+
+    await addAuthorIndex()
+
+    const id = await addBlogEntry(
+      'ulf',
+      'ulf@email.com',
+      `More content at ${new Date().toLocaleTimeString()}`
+    )
+
+    if (id) {
+      addComment(id, 'sauron', "I'm watching you")
+    }
 
     await queryBlog('ulf')
 
