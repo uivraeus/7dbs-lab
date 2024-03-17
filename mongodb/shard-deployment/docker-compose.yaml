@@ -1,0 +1,75 @@
+# Inspired by https://medium.com/workleap/the-only-local-mongodb-replica-set-with-docker-compose-guide-youll-ever-need-2f0b74dd8384
+version: "3.8"
+
+services:
+  mongodb1:
+    image: mongo:latest
+    command: ["--configsvr", "--replSet", "configSet", "--bind_ip_all", "--port", "27017"]
+
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'configSet',configsvr:true, members:[{_id:0,host:'mongodb1:27017'}]})}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb1_data:/data"
+    networks:
+      - devcontainer_network
+
+  mongodb2:
+    image: mongo:latest
+    entrypoint: mongos
+    command: ["--configdb", "configSet/mongodb1:27017", "--bind_ip_all", "--port", "27017"]
+
+    volumes:
+      - "mongodb2_data:/data"
+    networks:
+      - devcontainer_network
+  
+  mongodb3:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27017"]
+    
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'shard1', members:[{_id:0,host:'mongodb3:27017'}]})}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb3_data:/data"
+    networks:
+      - devcontainer_network
+
+  mongodb4:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27017"]
+
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'shard2', members:[{_id:0,host:'mongodb4:27017'}]})}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb4_data:/data"
+    networks:
+      - devcontainer_network
+
+volumes:
+  mongodb1_data:
+  mongodb2_data:
+  mongodb3_data:
+  mongodb4_data:
+
+networks:
+  devcontainer_network:
+    name: 7dbs_devcontainer_default
+    external: true

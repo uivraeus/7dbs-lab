@@ -670,3 +670,299 @@ db.phones.report.find({ '_id.country': 8 }).limit(3)
 
 See [external-app](./external-app/index.js) for NodeJS example, or [external-python-app](./external-python-app/main.py) for a Python variant.
 
+## Notes from Day 3
+
+* No "multi-master" - strong consistency on writes ("CP")
+ 
+### Scratch pad
+
+Start replica set via separate [`docker compose` configuration](./rs-deployment/docker-compose.yaml) (see additional notes in [README](./rs-deployment/README.md)).
+
+```shell
+docker compose -f rs-deployment/docker-compose.yaml up -d
+```
+
+```shell
+mongosh mongodb://mongodb1:27017,mongodb2:27017,mongodb3:27017/?replicaSet=rs0
+```
+
+```js
+rs.status()
+```
+
+(a lot of info about the curren replica set status)
+
+```js
+db.echo.insertOne({ say: 'hello' })
+```
+
+```shell
+docker stop rs-deployment-mongodb1-1
+```
+
+```console
+rs0 [primary] test> db.echo.find()
+[ { _id: ObjectId('65f5a808f855f967fbda0e48'), say: 'hello' } ]
+rs0 [primary] test> rs.status()
+{
+  :
+  members: [
+    {
+      id: 0,
+      name: 'mongodb1:27017',
+      health: 0,
+      state: 8,
+      stateStr: '(not reachable/healthy)',
+        :
+    },
+    {
+      _id: 1,
+      name: 'mongodb2:27017',
+      health: 1,
+      state: 2,
+      stateStr: 'SECONDARY',
+        :
+    },
+    {
+      _id: 2,
+      name: 'mongodb3:27017',
+      health: 1,
+      state: 1,
+      stateStr: 'PRIMARY',
+        :
+    }
+      :
+  ]
+    :
+  :
+}
+rs0 [primary] test> db.isMaster().ismaster
+true
+rs0 [primary] test> db.isMaster().primary
+mongodb3:27017
+```
+
+> `mongosh` kept the connection (switched to 3rd instance, which became the new `PRIMARY`)
+>
+> Open connection to the (only) secondary instance:
+>
+> ```console
+> $ mongosh mongodb2:27017
+>   :
+> rs0 [direct: secondary] test> db.isMaster().ismaster
+> false
+> rs0 [direct: secondary] test> db.echo.insertOne({ say: 'is this thing on?' })
+> MongoServerError[NotWritablePrimary]: not primary
+> rs0 [direct: secondary] test> db.echo.find()
+> MongoServerError[NotPrimaryNoSecondaryOk]: not primary - consider using db.getMongo().setReadPref() or readPreference in the connection string
+>
+> It _is_ possible to configure reading from secondaries (but not default)
+
+```shell
+docker stop rs-deployment-mongodb3-1
+```
+> For me, the only remaining node doesn't become a new `PRIMARY`. I can connect directly to it but the prompt says `rs0 [direct: secondary] ` (as does output from `rs.status()`).
+>
+> My `mongosh` session which was started with the connection string of all instances just throws various network errors, e.g.
+>
+> ```console
+> MongoServerSelectionError: getaddrinfo ENOTFOUND mongodb1
+> ```
+
+```shell
+docker start rs-deployment-mongodb1-1
+docker start rs-deployment-mongodb3-1
+```
+
+```console
+rs0 [primary] test> db.isMaster().primary
+mongodb1:27017
+rs0 [primary] test> db.echo.find()
+[ { _id: ObjectId('65f5a808f855f967fbda0e48'), say: 'hello' } ]
+```
+
+```shell
+docker compose -f rs-deployment/docker-compose.yaml down --rmi all --volumes
+```
+
+Starting new set of nodes in a "sharding" setup (see [shard-deployment configuration](./shard-deployment/docker-compose.yaml)).
+
+```shell
+docker compose -f shard-deployment/docker-compose.yaml up -d
+```
+
+> Can't do it like in the book! My two sharding servers won't start. The following is shown in the log:
+>
+> ```log
+> BadValue: Cannot start a shardsvr as a standalone server. Please use the option --replSet to start the node as a replica set.
+> ```
+>
+> Obviously new rules applies since the book was written. Follow [this guide](https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/) instead and configure replica sets also for the shard servers.
+
+```shell
+mongosh mongodb://mongodb2:27017/admin
+```
+
+(this is the `mongos` server)
+
+```console
+[direct: mongos] admin> sh.addShard('shard1/mongodb3:27017')
+{
+  shardAdded: 'shard1',
+  ok: 1,
+  '$clusterTime': {
+    clusterTime: Timestamp({ t: 1710605933, i: 5 }),
+    signature: {
+      hash: Binary.createFromBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAA=', 0),
+      keyId: Long('0')
+    }
+  },
+  operationTime: Timestamp({ t: 1710605933, i: 5 })
+}
+[direct: mongos] admin> sh.addShard('shard2/mongodb4:27017')
+{
+  shardAdded: 'shard2',
+  ok: 1,
+  '$clusterTime': {
+    clusterTime: Timestamp({ t: 1710605940, i: 14 }),
+    signature: {
+      hash: Binary.createFromBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAA=', 0),
+      keyId: Long('0')
+    }
+  },
+  operationTime: Timestamp({ t: 1710605940, i: 4 })
+}
+```
+
+> Note that I had to use a slightly different argument to `sh.addShard` compared to the book. Without that change I got the following error:
+>
+> ```console
+> [direct: mongos] test> sh.addShard('mongodb3:27017')
+MongoServerError[OperationFailed]: host is part of set shard1; use replica set url format <setname>/<server1>,<server2>, ...
+> ```
+
+```js
+sh.status() //confirm `addShard` operations
+
+```
+
+```js
+db.runCommand({ enablesharding: 'test' })
+db.runCommand({ shardcollection: 'test.cities', key: {name: 1} }) // shard by city name
+```
+
+```console
+$ mongoimport --host mongodb2:27017 --db test --collection cities --type json --legacy  mongoCities100000.json
+2024-03-16T17:26:41.365+0000    connected to: mongodb://mongodb2:27017/
+2024-03-16T17:26:44.162+0000    99838 document(s) imported successfully. 0 document(s) failed to import.
+```
+
+> ***NOT json***
+>
+> The file extension is `.json` but it's more like a (long) list of `js` objects. Thankfully, the `--legacy` argument was available to cope with this.
+
+
+```js
+db.cities.createIndex({ location: '2d' })
+```
+
+> Must create index to enable `$geoNear` (see below), i.e. not possible to query "inefficiently" w/o index.
+
+```js
+db.cities.aggregate([
+  {
+    $geoNear: {
+      near: [45.52, -122.67], // Portland OR
+      distanceField: 'dist'
+    }
+  },
+  {
+    $sort: {
+      population: -1
+    }
+  },
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      population: 1,
+      dist: 1
+    }
+  }
+])
+```
+
+> ***This can't be a query of "cities close to Portland" !?***
+>
+> It's just a list of cities sorted on population with a `dist` field telling how far from Portland it is.
+>
+> * List of cities "near Portland" must be sorted on `dist` (ascending order), or...
+> * It makes more sense to add `maxDistance: 1.0` to the `$geoNear` stage like below.
+
+```js
+db.cities.aggregate([
+  {
+    $geoNear: {
+      near: [45.52, -122.67], // Portland OR
+      distanceField: 'dist',
+      maxDistance: 1.0
+    }
+  },
+  {
+    $sort: {
+      population: -1
+    }
+  },
+  {
+    $project: {
+      _id: 0,
+      name: 1,
+      population: 1,
+      dist: 1
+    }
+  }
+])
+```
+
+```shell
+echo "hello earthlings" > greeting.txt
+mongofiles -h mongodb2:27017 list
+mongofiles -h mongodb2:27017 put greeting.txt
+```
+
+```console
+2024-03-17T15:20:11.630+0000    connected to: mongodb://mongodb2:27017/
+2024-03-17T15:20:11.630+0000    adding gridFile: greeting.txt
+
+2024-03-17T15:20:11.749+0000    added gridFile: greeting.txt
+```
+
+```console
+$ mongofiles -h mongodb2:27017 list
+2024-03-17T15:20:56.571+0000    connected to: mongodb://mongodb2:27017/
+greeting.txt    17
+```
+
+```console
+[direct: mongos] test> show collections
+cities
+fs.chunks
+fs.files
+[direct: mongos] test> db.fs.files.find()
+[
+  {
+    _id: ObjectId('65f70a2b237d6616e828bdf8'),
+    length: Long('17'),
+    chunkSize: 261120,
+    uploadDate: ISODate('2024-03-17T15:20:11.746Z'),
+    filename: 'greeting.txt',
+    metadata: {}
+  }
+]
+```
+
+```shell
+rm greeting.txt
+mongofiles -h mongodb2:27017 get greeting.txt
+cat greeting.txt
+```
