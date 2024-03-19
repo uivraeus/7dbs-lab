@@ -897,7 +897,9 @@ db.cities.aggregate([
 > It's just a list of cities sorted on population with a `dist` field telling how far from Portland it is.
 >
 > * List of cities "near Portland" must be sorted on `dist` (ascending order), or...
-> * It makes more sense to add `maxDistance: 1.0` to the `$geoNear` stage like below.
+> * It makes more sense to add `maxDistance: <something>` to the `$geoNear` stage like below.
+>
+> This was probably different when the book was written as there was a [default `limit` of 100 prior to v4.2.](https://www.mongodb.com/docs/manual/reference/operator/aggregation/geoNear/#minimum-distance)
 
 ```js
 db.cities.aggregate([
@@ -965,4 +967,128 @@ fs.files
 rm greeting.txt
 mongofiles -h mongodb2:27017 get greeting.txt
 cat greeting.txt
+```
+
+### Homework
+
+* Good description of replica sets in the [official docs)(https://www.mongodb.com/docs/manual/replication/)
+* Docs for [geospatial queries](https://www.mongodb.com/docs/v7.0/geospatial-queries/) includes info on how to create `2dsphere` indexes.
+
+#### London query
+
+##### Prepare by creating a `2dsphere` index.
+
+```js
+db.cities.createIndex({ location: '2dsphere' })
+```
+
+```console
+MongoServerError[Location16755]: Index build failed: 01655140-d81f-4ec9-8bdf-369257bf85ab: Collection test.cities ( 6f92b998-51a2-402b-94c4-dc5af61c8755 ) :: caused by :: Can't extract geo keys: { _id: ObjectId('65f870523bb585eafb687f57'), name: "McMurdo Station", country: "AQ", timezone: "Antarctica/McMurdo", population: 1258, location: { latitude: -77.85059, longitude: 166.66534 } }  can't project geometry into spherical CRS: { latitude: -77.85059, longitude: 166.66534 }
+```
+
+According to the docs, [legacy coordinate pairs](https://www.mongodb.com/docs/v7.0/geospatial-queries/#legacy-coordinate-pairs) must be long/lat - _in that order_!
+
+Inspecting the data it looks like this is fulfilled by quite many cities (two thirds?). BUT (!) - based on Google Maps (which use lat/long order), it looks like the coordinates are switched for the first entries (and a few random samples further in).This error appears already in the downloaded json-file. How many more cities have invalid entries? 
+
+All of them!? No, I think that those which lists `latitude` first are actually correct (about a third of all entries). Do some `sed` magic and then load the corrected file. Then run the following scan/update to ensure that all documents use the recommended array format with longitude first.
+
+
+```js
+db.cities.updateMany(
+    {
+      // All documents
+    },
+    [{
+      $set: {
+        location: [ '$location.longitude', '$location.latitude' ]
+      }
+    }]
+)
+```
+
+```console
+{
+  acknowledged: true,
+  insertedId: null,
+  matchedCount: 99838,
+  modifiedCount: 99838,
+  upsertedCount: 0
+}
+```
+
+```js
+db.cities.createIndex({ location: '2dsphere' })
+```
+
+(Success! phew!)
+
+#### 50 mile radius around London
+
+> All query variants below return _453_ (number of cities). Remove the `count` step to see the actual results.
+
+Use [`$geoWithin`](https://www.mongodb.com/docs/manual/reference/operator/query/geoWithin/):
+
+_Legacy coordinates:_
+
+```js
+db.cities.find({
+  location: {
+    $geoWithin: {
+      $centerSphere: [
+        [ -0.12574, 51.50853 ], // London GB
+        50/3963.2 // radians; https://www.mongodb.com/docs/manual/core/indexes/index-types/geospatial/2d/calculate-distances/#convert-miles-to-radians 
+      ]
+    }
+  }
+}).count()
+```
+
+Alternative; [`$nearSphere`](https://www.mongodb.com/docs/manual/reference/operator/query/nearSphere/) ([sorted but slower](https://www.mongodb.com/docs/manual/reference/operator/query/geoWithin/#unsorted-results))
+
+_GeoJSON:_
+
+```js
+db.cities.find({
+  location: {
+    $nearSphere: {
+      $geometry: {
+        type: 'Point',
+        coordinates: [ -0.12574, 51.50853 ] // London GB
+      },
+      $maxDistance: 50 * 1609.34 // meters
+    }
+  }
+}).count()
+```
+
+_Legacy coordinates:_
+
+```js
+db.cities.find({
+  location: {
+    $nearSphere: [ -0.12574, 51.50853 ], // London GB
+    $maxDistance: 50/3963.2 // radians
+    }
+  }
+).count()
+```
+
+Via aggregate pipeline (and legacy coordinates) to get the `dist` field
+
+```js
+db.cities.aggregate([
+  {
+    $geoNear: {
+      near: [ -0.12574, 51.50853 ], // London GB
+      key: 'location',
+      spherical: true,
+      maxDistance: 50/3963.2, // radians
+      distanceField: 'dist', // output
+      distanceMultiplier: 3963.2 // output in miles
+    }
+  },
+  {
+    $count: 'num_near_cities'
+  }
+])
 ```

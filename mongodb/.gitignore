@@ -1,4 +1,4 @@
 node_modules
 package-lock.json
 venv
-mongoCities100000.js*
+mongoCities100000*
