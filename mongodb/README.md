@@ -673,6 +673,8 @@ See [external-app](./external-app/index.js) for NodeJS example, or [external-pyt
 ## Notes from Day 3
 
 * No "multi-master" - strong consistency on writes ("CP")
+* Sharding-config and strategy could have been better explained
+  * Pitfalls?
  
 ### Scratch pad
 
@@ -1022,7 +1024,7 @@ db.cities.createIndex({ location: '2dsphere' })
 
 (Success! phew!)
 
-#### 50 mile radius around London
+##### 50 mile radius around London
 
 > All query variants below return _453_ (number of cities). Remove the `count` step to see the actual results.
 
@@ -1092,3 +1094,238 @@ db.cities.aggregate([
   }
 ])
 ```
+
+#### Replicated Sharding
+
+See [rs-shard-deployment](./rs-shard-deployment/README.md) for details on how to setup and initialize the cluster.
+
+Load 100000 cities (again)
+
+```console
+$ mongoimport --host mongodb-mongos:27017 --db test --collection cities --type json --legacy  ../mongoCities100000-corrected.json
+2024-03-21T18:44:45.677+0000    connected to: mongodb://mongodb-mongos:27017/
+2024-03-21T18:44:48.678+0000    [###################.....] test.cities  9.83MB/12.3MB (79.7%)
+2024-03-21T18:44:49.445+0000    [########################] test.cities  12.3MB/12.3MB (100.0%)
+2024-03-21T18:44:49.445+0000    99838 document(s) imported successfully. 0 document(s) failed to import.
+```
+
+Via mongos:
+
+```console
+[direct: mongos] test> sh.status()
+shardingVersion
+{ _id: 1, clusterId: ObjectId('65fc7cd09cdce409ee8c453c') }
+---
+shards
+[
+  {
+    _id: 'shard1',
+    host: 'shard1/mongodb-shard1-1:27017,mongodb-shard1-2:27017,mongodb-shard1-3:27017',
+    state: 1,
+    topologyTime: Timestamp({ t: 1711045893, i: 2 })
+  },
+  {
+    _id: 'shard2',
+    host: 'shard2/mongodb-shard2-1:27017,mongodb-shard2-2:27017,mongodb-shard2-3:27017',
+    state: 1,
+    topologyTime: Timestamp({ t: 1711045903, i: 1 })
+  }
+]
+---
+active mongoses
+[ { '7.0.6': 1 } ]
+---
+autosplit
+{ 'Currently enabled': 'yes' }
+---
+balancer
+{
+  'Currently enabled': 'yes',
+  'Currently running': 'no',
+  'Failed balancer rounds in last 5 attempts': 0,
+  'Migration Results for the last 24 hours': 'No recent migrations'
+}
+---
+databases
+[
+  :
+  {
+    database: {
+      _id: 'test',
+      primary: 'shard2',
+      partitioned: false,
+      version: {
+        uuid: UUID('7f1c51c1-6fd4-4d39-a43b-e47cce2bfe0c'),
+        timestamp: Timestamp({ t: 1711046684, i: 1 }),
+        lastMod: 1
+      }
+    },
+    collections: {}
+  }
+]
+```
+
+> ***No sharding!?!***
+>
+> "Balancer" enabled but not _running_!?
+>
+> Two shards but the entire `test` database is in `shard2`.
+>
+> Confirm by connecting mongosh directly to mongodb-shard1-1 and mongodb-shard2-1 directly:
+>
+> ```console
+> $ echo "db.cities.countDocuments()" |  mongosh mongodb://mongodb-shard1-1:27017 --quiet
+> shard1 [direct: primary] test> db.cities.countDocuments()
+> 0
+> ```
+>
+> ```console
+> $ echo "db.cities.countDocuments()" |  mongosh mongodb://mongodb-shard2-1:27017 --quiet
+> shard2 [direct: primary] test> db.cities.countDocuments()
+> 99838
+> ```
+
+Try to enable "Balancer" explicitly
+
+```console
+[direct: mongos] test> sh.startBalancer() 
+{
+  ok: 1,
+  '$clusterTime': {
+    clusterTime: Timestamp({ t: 1711047693, i: 5 }),
+    signature: {
+      hash: Binary.createFromBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAA=', 0),
+      keyId: Long('0')
+    }
+  },
+  operationTime: Timestamp({ t: 1711047693, i: 5 })
+}
+```
+
+Explicitly activate sharding according to the [docs](https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/#shard-a-collection):
+
+```console
+[direct: mongos] test> sh.shardCollection("test.cities", { country : "hashed" } )
+MongoServerError[InvalidOptions]: Please create an index that starts with the proposed shard key before sharding the collection. 
+```
+
+New attempt:
+
+```console
+[direct: mongos] test> db.cities.drop()
+true
+[direct: mongos] test> sh.shardCollection("test.cities", { country : "hashed" } )
+{
+  collectionsharded: 'test.cities',
+  ok: 1,
+  '$clusterTime': {
+    clusterTime: Timestamp({ t: 1711050112, i: 43 }),
+    signature: {
+      hash: Binary.createFromBase64('AAAAAAAAAAAAAAAAAAAAAAAAAAA=', 0),
+      keyId: Long('0')
+    }
+  },
+  operationTime: Timestamp({ t: 1711050112, i: 43 })
+}
+```
+
+Load all cities again, then check status
+
+```console
+[direct: mongos] test> sh.status()
+shardingVersion
+{ _id: 1, clusterId: ObjectId('65fc7cd09cdce409ee8c453c') }
+---
+shards
+[
+  {
+    _id: 'shard1',
+    host: 'shard1/mongodb-shard1-1:27017,mongodb-shard1-2:27017,mongodb-shard1-3:27017',
+    state: 1,
+    topologyTime: Timestamp({ t: 1711045893, i: 2 })
+  },
+  {
+    _id: 'shard2',
+    host: 'shard2/mongodb-shard2-1:27017,mongodb-shard2-2:27017,mongodb-shard2-3:27017',
+    state: 1,
+    topologyTime: Timestamp({ t: 1711045903, i: 1 })
+  }
+]
+---
+active mongoses
+[ { '7.0.6': 1 } ]
+---
+autosplit
+{ 'Currently enabled': 'yes' }
+---
+balancer
+{
+  'Currently enabled': 'yes',
+  'Currently running': 'no',
+  'Failed balancer rounds in last 5 attempts': 0,
+  'Migration Results for the last 24 hours': 'No recent migrations'
+}
+---
+databases
+[
+  {
+    database: { _id: 'config', primary: 'config', partitioned: true },
+    collections: {
+      'config.system.sessions': {
+        shardKey: { _id: 1 },
+        unique: false,
+        balancing: true,
+        chunkMetadata: [ { shard: 'shard1', nChunks: 1 } ],
+        chunks: [
+          { min: { _id: MinKey() }, max: { _id: MaxKey() }, 'on shard': 'shard1', 'last modified': Timestamp({ t: 1, i: 0 }) }
+        ],
+        tags: []
+      }
+    }
+  },
+  {
+    database: {
+      _id: 'test',
+      primary: 'shard2',
+      partitioned: false,
+      version: {
+        uuid: UUID('7f1c51c1-6fd4-4d39-a43b-e47cce2bfe0c'),
+        timestamp: Timestamp({ t: 1711046684, i: 1 }),
+        lastMod: 1
+      }
+    },
+    collections: {
+      'test.cities': {
+        shardKey: { country: 'hashed' },
+        unique: false,
+        balancing: true,
+        chunkMetadata: [
+          { shard: 'shard1', nChunks: 2 },
+          { shard: 'shard2', nChunks: 2 }
+        ],
+        chunks: [
+          { min: { country: MinKey() }, max: { country: Long('-4611686018427387902') }, 'on shard': 'shard2', 'last modified': Timestamp({ t: 1, i: 0 }) },
+          { min: { country: Long('-4611686018427387902') }, max: { country: Long('0') }, 'on shard': 'shard2', 'last modified': Timestamp({ t: 1, i: 1 }) },
+          { min: { country: Long('0') }, max: { country: Long('4611686018427387902') }, 'on shard': 'shard1', 'last modified': Timestamp({ t: 1, i: 2 }) },
+          { min: { country: Long('4611686018427387902') }, max: { country: MaxKey() }, 'on shard': 'shard1', 'last modified': Timestamp({ t: 1, i: 3 }) }
+        ],
+        tags: []
+      }
+    }
+  }
+]
+```
+
+```console
+ echo "db.cities.countDocuments()" |  mongosh mongodb://mongodb-shard1-1:27017 --quiet
+shard1 [direct: primary] test> db.cities.countDocuments()
+58202
+```
+
+```console
+$ echo "db.cities.countDocuments()" |  mongosh mongodb://mongodb-shard2-1:27017 --quiet
+shard2 [direct: primary] test> db.cities.countDocuments()
+41636
+shard2 [direct: primary] test> 
+```
+

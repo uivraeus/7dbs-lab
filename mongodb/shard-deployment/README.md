@@ -2,7 +2,7 @@
 
 The replica sets will be initialized via a Docker health probe which periodically executes one of the following four pieces of code, depending on the server's role.
 
-> Note that there is not replica set for the `mongos` server. The `addShard` operations that must be carried out there are not automated here.
+> Note that there is no replica set for the `mongos` server. The `addShard` operations that must be carried out there are not automated here.
 
 The config server (mongodb1):
 

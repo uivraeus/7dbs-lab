@@ -1,0 +1,116 @@
+# Inspired by https://medium.com/workleap/the-only-local-mongodb-replica-set-with-docker-compose-guide-youll-ever-need-2f0b74dd8384
+version: "3.8"
+
+services:
+  mongodb-config:
+    image: mongo:latest
+    command: ["--configsvr", "--replSet", "configSet", "--bind_ip_all", "--port", "27017"]
+
+    healthcheck:
+      test: echo "${RS_INIT_CONFIG:?}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb-config_data:/da2ta"
+    networks:
+      - devcontainer_network
+
+  mongodb-mongos:
+    image: mongo:latest
+    entrypoint: mongos
+    command: ["--configdb", "configSet/mongodb-config:27017", "--bind_ip_all", "--port", "27017"]
+
+    volumes:
+      - "mongodb-mongos_data:/data"
+    networks:
+      - devcontainer_network
+  
+  mongodb-shard1-1:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27017"]
+    
+    healthcheck:
+      test: echo "${RS_INIT_SHARD1:?}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb-shard1-1_data:/data"
+    networks:
+      - devcontainer_network
+  
+  mongodb-shard1-2:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27017"]
+    
+    volumes:
+      - "mongodb-shard1-2_data:/data" 
+    networks:
+      - devcontainer_network
+
+  mongodb-shard1-3:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard1", "--bind_ip_all", "--port", "27017"]
+    
+    volumes:
+      - "mongodb-shard1-3_data:/data"
+    networks:
+      - devcontainer_network
+
+  mongodb-shard2-1:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27017"]
+
+    healthcheck:
+      test: echo "${RS_INIT_SHARD2:?}" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
+
+    volumes:
+      - "mongodb-shard2-1_data:/data"
+    networks:
+      - devcontainer_network
+
+  mongodb-shard2-2:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27017"]
+    
+    volumes:
+      - "mongodb-shard2-2_data:/data"
+    networks:
+      - devcontainer_network
+
+  mongodb-shard2-3:
+    image: mongo:latest
+    command: ["--shardsvr", "--replSet", "shard2", "--bind_ip_all", "--port", "27017"]
+    
+    volumes:
+      - "mongodb-shard2-3_data:/data"
+    networks:
+      - devcontainer_network
+
+
+volumes:
+  mongodb-config_data:
+  mongodb-mongos_data:
+  mongodb-shard1-1_data:
+  mongodb-shard1-2_data:
+  mongodb-shard1-3_data:
+  mongodb-shard2-1_data:
+  mongodb-shard2-2_data:
+  mongodb-shard2-3_data:
+
+networks:
+  devcontainer_network:
+    name: 7dbs_devcontainer_default
+    external: true
