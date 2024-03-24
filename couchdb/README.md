@@ -2,6 +2,7 @@
 
 ## Notes from Day 1
 
+* Robust solution; "crash-only design"
 * No "Admin Party" in v3
 * Simple/straight-forward CRUD strategy but a bit cumbersome to follow "manually" (many fields to explicitly provide)
 * Versions (revisions) and how to reference them is a bit unclear (when does `If-Match` work?)  
@@ -327,3 +328,214 @@ GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt?rev=3-
 > Returns the previous attachment, like expected.
 >
 > Doc-typo? For [regular document GET](https://docs.couchdb.org/en/stable/api/document/common.html#obtaining-a-specific-revision) it looks like the query parameter is the only option.
+
+## Notes from Day 2
+
+* Confusing instructions on how (/if) to test map-functions when creating a new view in Fauxton.
+  * But I like the Fauxton tool/app. Very convenient.
+* "Emitted" entries from map-functions are presented in alphabetical order
+  * Pick "keys" that fit this fact
+* General [intro to views in the docs](https://docs.couchdb.org/en/stable/ddocs/views/intro.html) was a good complement to the book
+
+  > _"If you have a lot of documents, that takes quite a bit of time and you might wonder if it is not horribly inefficient to do this. Yes, it would be, but CouchDB is designed to avoid any extra costs: it only runs through all documents once, when you first query your view. If a document is changed, the map function is only run once, to recompute the keys and values for that single document"_
+
+* The value emitted is stored explicitly, i.e. if the entire `doc` is emitted it implies doubled storage of it. See this [Stack Overflow answer](https://stackoverflow.com/a/36213957) for details.
+ 
+### Scratch pad
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_all_docs
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_all_docs?include_docs=true
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/myLab
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/myLab/_view/my-rev
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name/?key="Help!"
+```
+
+```shell
+gem install libxml-ruby
+```
+
+```shell
+gem install couchrest
+```
+
+```shell
+curl -L -o dbdump_artistalbumtrack.xml.gz https://archive.org/download/jamendo-dbdump_artistalbumtrack-2011/dbdump_artistalbumtrack_20111231.xml.gz
+```
+
+> ***Obsolete link in the book***
+>
+> This download URL in the book doesn't exist any longer. Also, the reference (<http://developer.jamendo.com/en/wiki/DatabaseDumps>) in the [xml example](./jamendo-dbdata-example.xml) is broken.
+>
+> Luckily I found an archived dump instead.
+
+```shell
+zcat dbdump_artistalbumtrack.xml.gz | ruby import_from_jamendo.rb
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name/?key="demo"
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?limit=5
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?limit=5&startkey="C"
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?startkey="X"&endkey="Y"
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?descending=true&startkey="Y"&endkey="X"
+```
+
+> Flipped `startkey`/`endkey` when reversed the order via `descending=true`
+
+### Homework
+
+* `emit()` - arrays as `key`
+  * The whole array is the key (sorted with [0] as highest precedence)
+  * Supports "group level" queries
+    * Example: Date [arrays are used as keys](https://docs.couchdb.org/en/stable/ddocs/views/intro.html#find-many)
+    * Example: [`group_level` query parameter](https://docs.couchdb.org/en/stable/ddocs/views/intro.html#the-view-to-get-comments-for-posts)
+* Available view query parameters can be found in the [API docs](https://docs.couchdb.org/en/stable/api/ddoc/views.html#get--db-_design-ddoc-_view-view), examples:
+  * `attachments` (boolean)
+  * `inclusive_end` (boolean)
+  * `skip`(number)
+  * `sorted` (boolean)
+
+#### Random artist
+
+Inspect a document:
+
+```http
+GET {{COUCH_ROOT_URL}}/music/5385
+```
+
+Using Fauxton, create a view `random`, index `artist`, with the following mapping function:
+
+```js
+function (doc) {
+  if ('random' in doc && doc.name) {
+    emit(doc.random, doc.name)
+  }
+}
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/random/_view/artist/?limit=1&startkey=0.9999999&endkey=0
+```
+
+Query with the following cURL command:
+
+```shell
+curl -s "http://localhost:5984/music/_design/random/_view/artist/?limit=1&startkey=$(ruby -e 'puts rand')" | jq
+```
+
+Strictly speaking there is a risk of getting en empty result it the random value is greater than the largest assigned during import.
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_design/random/_view/artist/?limit=1&descending=true
+```
+
+> ***Response (inner) body***
+>
+> ```json
+> {
+>   "id": "367592",
+>   "key": 0.9999762693619031,
+>   "value": "Patchy"
+> }
+> ```
+
+```shell
+curl -s "http://localhost:5984/music/_design/random/_view/artist/?limit=1&startkey=$(ruby -e 'puts [rand, 0.9999762693619031].min')" | jq
+```
+
+#### Random album, track and tag
+
+Using Fauxton, add index `album` to view `random` with the following mapping function:
+
+```js
+function (doc) {
+  if (doc.albums && doc.albums.length) {
+    for (const album of doc.albums) {
+      if ('random' in album && album.name) {
+        emit(album.random, album.name)
+      }
+    }
+  }
+}
+```
+
+Similar for `track`:
+
+```js
+function (doc) {
+  if (doc.albums && doc.albums.length) {
+    for (const album of doc.albums) {
+      if (album.tracks && album.tracks.length) {
+        for (const track of album.tracks) {
+          if ('random' in track && track.name) {
+            emit(track.random, track.name)
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+And for `tag`:
+
+```js
+function (doc) {
+  if (doc.albums && doc.albums.length) {
+    for (const album of doc.albums) {
+      if (album.tracks && album.tracks.length) {
+        for (const track of album.tracks) {
+          if (track.tags && track.tags.length) {
+            for (const tag of track.tags)
+              if ('random' in tag && tag.idstr) {
+                emit(tag.random, tag.idstr)
+              }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+> ***The task is a bit unclear...***
+>
+> What's the desired "values" for album, track and tag? Better with objects where track, album and artist is included when picking a random tag?
+
+Some test queries (ignoring the risk of missing the last entry):
+
+```shell
+curl -s "http://localhost:5984/music/_design/random/_view/album/?limit=1&startkey=$(ruby -e 'puts [rand, 0.9999762693619031].min')" | jq
+curl -s "http://localhost:5984/music/_design/random/_view/track/?limit=1&startkey=$(ruby -e 'puts [rand, 0.9999762693619031].min')" | jq
+curl -s "http://localhost:5984/music/_design/random/_view/tag/?limit=1&startkey=$(ruby -e 'puts [rand, 0.9999762693619031].min')" | jq
+```
+
