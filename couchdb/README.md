@@ -11,7 +11,7 @@
 
 Status check:
 
-```http
+```rest
 GET http://localhost:5984
 ```
 
@@ -20,7 +20,7 @@ Fauxton (web) UI: <http://localhost:5984/_utils/>
 * Create initial "music" database with "The Beatles" document.
 * Multiple revisions
 
-```http
+```rest
 GET http://localhost:5984/music/
 ```
 
@@ -38,21 +38,21 @@ GET http://localhost:5984/music/
 
 Confirm public access:
 
-```http
+```rest
 GET http://localhost:5984/music/
 ```
 
 Custom variables (simplify subsequent requests):
 
-```http
+```rest
 @COUCH_ROOT_URL = http://localhost:5984
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e0004eb
 ```
 
-```http
+```rest
 POST {{COUCH_ROOT_URL}}/music/
 Content-Type: application/json
 
@@ -71,7 +71,7 @@ Content-Type: application/json
 > }
 > ```
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e0088b3
 Content-Type: application/json
 
@@ -96,7 +96,7 @@ Content-Type: application/json
 > }
 > ```
 
-```http
+```rest
 DELETE {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e0088b3
 If-Match: 2-17e4ce41cd33d6a38f04a8452d5a860b
 ```
@@ -128,7 +128,7 @@ Other supported HTTP methods:
 
 #### Document with custom `_id`
 
-```http
+```rest
 POST {{COUCH_ROOT_URL}}/music/
 Content-Type: application/json
 
@@ -137,18 +137,18 @@ Content-Type: application/json
 }
 ```
 
-```http
+```rest
 DELETE {{COUCH_ROOT_URL}}/music/ulf0001
 If-Match: 1-967a00dff5e02add41819138abb3284d
 ```
 
 #### Create/delete database (as server admin)
 
-```http
+```rest
 curl -X PUT -u couch:couch {{COUCH_ROOT_URL}}/newdb
 ```
 
-```http
+```rest
 curl -X DELETE -u couch:couch {{COUCH_ROOT_URL}}/newdb
 ```
 
@@ -156,7 +156,7 @@ curl -X DELETE -u couch:couch {{COUCH_ROOT_URL}}/newdb
 
 ##### First create the document
 
-```http
+```rest
 POST {{COUCH_ROOT_URL}}/music/
 Content-Type: application/json
 
@@ -177,7 +177,7 @@ Content-Type: application/json
 
 ##### The attach according to the [API docs](https://docs.couchdb.org/en/stable/api/document/attachments.html#put--db-docid-attname)
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 Content-Type: text/plain
 If-Match: 1-3a1e23bf54a67a86df15e36a72cc493c
@@ -203,7 +203,7 @@ Jens Thele
 
 Confirm/inspect:
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
 ```
 
@@ -228,7 +228,7 @@ GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
 
 ##### Fetch the attachment according to the [API docs](https://docs.couchdb.org/en/stable/api/document/attachments.html#get--db-docid-attname)
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 If-Match: 2-1e26ba1b039e4246b613993d58ce0a90
 ```
@@ -254,7 +254,7 @@ If-Match: 2-1e26ba1b039e4246b613993d58ce0a90
 
 ##### Alternative with cURL and external file
 
-```http
+```rest
 curl -X PUT --header 'Content-Type: text/plain' --header 'If-Match: 2-1e26ba1b039e4246b613993d58ce0a90' --data '@former-scooter-members.txt' http://localhost:5984/music/992aa69aef40256536a422d51e00ae7f/former-members.txt
 ```
 
@@ -268,13 +268,13 @@ curl -X PUT --header 'Content-Type: text/plain' --header 'If-Match: 2-1e26ba1b03
 > }
 > ```
 
-```http
+```rest
 curl --header 'If-Match: 3-fab8a962fc27ecd15fb8d6a39434a935' http://localhost:5984/music/992aa69aef40256536a422d51e00ae7f/former-members.txt
 ```
 
 ##### Update `members.txt`
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 Content-Type: text/plain
 If-Match: 3-fab8a962fc27ecd15fb8d6a39434a935
@@ -296,7 +296,7 @@ party-ulf
 > }
 > ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 ```
 
@@ -314,14 +314,14 @@ GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 
 According to the [API docs](https://docs.couchdb.org/en/stable/api/document/attachments.html#get--db-docid-attname), the `If-Match` header should behave like the `rev` query parameter. But it doesn't!?
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt
 If-Match: 3-fab8a962fc27ecd15fb8d6a39434a935
 ```
 
 > Still returns the latest attachment! (with "party-ulf")
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt?rev=3-fab8a962fc27ecd15fb8d6a39434a935
 ```
 
@@ -343,27 +343,27 @@ GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/members.txt?rev=3-
  
 ### Scratch pad
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_all_docs
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_all_docs?include_docs=true
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/myLab
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/myLab/_view/my-rev
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name/?key="Help!"
 ```
 
@@ -389,23 +389,23 @@ curl -L -o dbdump_artistalbumtrack.xml.gz https://archive.org/download/jamendo-d
 zcat dbdump_artistalbumtrack.xml.gz | ruby import_from_jamendo.rb
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/albums/_view/by_name/?key="demo"
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?limit=5
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?limit=5&startkey="C"
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?startkey="X"&endkey="Y"
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?descending=true&startkey="Y"&endkey="X"
 ```
 
@@ -428,7 +428,7 @@ GET {{COUCH_ROOT_URL}}/music/_design/artists/_view/by_name/?descending=true&star
 
 Inspect a document:
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/5385
 ```
 
@@ -442,7 +442,7 @@ function (doc) {
 }
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/random/_view/artist/?limit=1&startkey=0.9999999&endkey=0
 ```
 
@@ -454,7 +454,7 @@ curl -s "http://localhost:5984/music/_design/random/_view/artist/?limit=1&startk
 
 Strictly speaking there is a risk of getting en empty result it the random value is greater than the largest assigned during import.
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_design/random/_view/artist/?limit=1&descending=true
 ```
 
@@ -559,7 +559,7 @@ curl -s "http://localhost:5984/music/_design/random/_view/tag/?limit=1&startkey=
 
 ### Scratch pad
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_changes
 ```
 
@@ -617,7 +617,7 @@ GET {{COUCH_ROOT_URL}}/music/_changes
 >
 > 💡 Note the `seq` fields (and `last_seq`)
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_changes?since=10039-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeH0uUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALd8sBw
 ```
 
@@ -638,13 +638,13 @@ GET {{COUCH_ROOT_URL}}/music/_changes?since=10039-g1AAAACReJzLYWBgYMpgTmHgzcvPy0
 
 Update my "Scooter" entry to observe the long-polling effects
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
 ```
 
 (To get the latest `_rev`)
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
 Content-Type: application/json
 
@@ -658,7 +658,7 @@ Content-Type: application/json
 
 ***Filter changes***
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/_design/whereabouts
 Authorization: Basic couch:couch
 Content-Type: application/json
@@ -681,7 +681,7 @@ Content-Type: application/json
 > }
 > ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/_changes?filter=whereabouts/by_country&country=RUS
 ```
 
@@ -692,21 +692,21 @@ GET {{COUCH_ROOT_URL}}/music/_changes?filter=whereabouts/by_country&country=RUS
 
 > I changed the access policy to public for `music-repl` manually via Fauxton after replication.
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/992aa69aef40256536a422d51e00ae7f
 ```
 
 > ✅ Works (same)
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/?rev=10-bb7a81b3f30636cd49edf2053aeda613
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/992aa69aef40256536a422d51e00ae7f/?rev=10-bb7a81b3f30636cd49edf2053aeda613
 ```
 
@@ -715,7 +715,7 @@ GET {{COUCH_ROOT_URL}}/music-repl/992aa69aef40256536a422d51e00ae7f/?rev=10-bb7a8
 
 ***Creating conflicts***
 
-```http
+```rest
 POST {{COUCH_ROOT_URL}}/music/
 Content-Type: application/json
 
@@ -725,7 +725,7 @@ Content-Type: application/json
 }
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/myconflicts
 ```
 
@@ -739,7 +739,7 @@ GET {{COUCH_ROOT_URL}}/music/myconflicts
 > }
 > ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/myconflicts
 ```
 
@@ -754,7 +754,7 @@ GET {{COUCH_ROOT_URL}}/music-repl/myconflicts
 > ```
 
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music-repl/myconflicts
 Content-Type: application/json
 
@@ -776,7 +776,7 @@ Content-Type: application/json
 > }
 > ```
 
-```http
+```rest
 PUT {{COUCH_ROOT_URL}}/music/myconflicts
 Content-Type: application/json
 
@@ -802,17 +802,17 @@ Content-Type: application/json
 
 After yet another replication...
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/myconflicts
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music/myconflicts
 ```
 
 > ❓Last update (in `music`) didn't "win", i.e. not the same "conflict resolution" as described in the book
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/myconflicts?conflicts=true
 ```
 
@@ -832,7 +832,7 @@ GET {{COUCH_ROOT_URL}}/music-repl/myconflicts?conflicts=true
 > }
 > ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/myconflicts?rev=2-26ee14140578ccafb87f7a1c6fe386b8
 ```
 
@@ -910,7 +910,7 @@ function (doc) {
 }
 ```
 
-```http
+```rest
 GET {{COUCH_ROOT_URL}}/music-repl/_design/status/_view/conflicts
 ```
 
