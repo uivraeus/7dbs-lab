@@ -539,3 +539,400 @@ curl -s "http://localhost:5984/music/_design/random/_view/track/?limit=1&startke
 curl -s "http://localhost:5984/music/_design/random/_view/tag/?limit=1&startkey=$(ruby -e 'puts [rand, 0.9999762693619031].min')" | jq
 ```
 
+## Notes from Day 3
+
+* _Incremental_ Map-Reduce (with "_rereducers_")
+* Changes API
+* Node v7 (ouch!) - current version as of trying this is v21!
+* For the changes API, `since=now` is very useful (bit not mentioned)
+* Replicas don't include older revisions
+  * Why?
+* The book didn't cover [Update Functions](https://docs.couchdb.org/en/stable/ddocs/ddocs.html#update-functions), which seems usable (for some tasks).
+  * Especially since the earlier chapters have included sections on stored procedures etc.  
+* Missing a section on access control (e.g. via [Validate Document Update Functions](https://docs.couchdb.org/en/stable/ddocs/ddocs.html#validate-document-update-functions))
+  * Actually missing this topic for _all_ databases covered in the book
+* The [_find](https://docs.couchdb.org/en/stable/api/database/find.html#api-db-find) API is not covered in the book (too new?)
+  * Alternative to querying via views?
+  * Selector syntax (more like MongoDB?)
+  * Indexes for efficiency
+* I would like to try something with PouchDB, e.g. test replication and offline availability in an browser app like [mentioned at in the docs](https://docs.couchdb.org/en/stable/replication/intro.html#migrating-data-to-clients).
+
+### Scratch pad
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_changes
+```
+
+(Big/slow query - everything CouchDB has)
+
+> ***Partial result***
+>
+> ```json
+> {
+>   "results": [
+>     {
+>       "seq": "4-g1AAAABteJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K5EBh4I8FiDJ0ACk_oPUZTAnsuQCBdgtzFJTzBKT0fVkAQAYWyJB",
+>       "id": "992aa69aef40256536a422d51e0004eb",
+>       "changes": [
+>         {
+>           "rev": "4-93a101178ba65f61ed39e60d70c9fd97"
+>         }
+>       ]
+>     },
+>     
+>       :
+>
+>     {
+>       "seq": "10039-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeH0uUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALd8sBw",
+>       "id": "3775",
+>       "changes": [
+>         {
+>           "rev": "1-45c33952b1001035f389abaaf03624c4"
+>         }
+>       ]
+>     },
+>     {
+>       "seq": "10040-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeEMuUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALkYsCA",
+>       "id": "348112",
+>       "changes": [
+>         {
+>           "rev": "1-432df76766153fc365363cfec7abcaff"
+>         }
+>       ]
+>     },
+>     {
+>       "seq": "10041-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeGMuUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALq0sCQ",
+>       "id": "348113",
+>       "changes": [
+>         {
+>           "rev": "1-9242b434ae44ed3cff04c302c49e25ab"
+>         }
+>       ]
+>     }
+>   ],
+>   "last_seq": "10041-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeGMuUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALq0sCQ",
+>   "pending": 0
+> }
+> ```
+>
+> 💡 Note the `seq` fields (and `last_seq`)
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_changes?since=10039-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYFBeH0uUIzdyDjJIMnEAF09DhPyWIAkQwOQ-o8wqANskIVZaopZYjK6tiwALd8sBw
+```
+
+(Much shorter response, just the changes after, ie `10040-...` - `10041-...`)
+
+> ***Long-polling (via cURL in a separate shell)***
+>
+> ```shell
+> curl -s "http://localhost:5984/music/_changes?since=now&feed=longpoll"
+> ```
+
+> ***Continuous feed (via cURL in a separate shell)***
+>
+> ```shell
+> curl -s "http://localhost:5984/music/_changes?since=now&feed=continuous"
+> ```
+
+
+Update my "Scooter" entry to observe the long-polling effects
+
+```http
+GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
+```
+
+(To get the latest `_rev`)
+
+```http
+PUT {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
+Content-Type: application/json
+
+{
+  "_id": "992aa69aef40256536a422d51e00ae7f",
+  "_rev": "17-d822b07c2ce72de4bbb16c0176681a2a",
+  "name": "Scooter",
+  "trending": 13
+}
+```
+
+***Filter changes***
+
+```http
+PUT {{COUCH_ROOT_URL}}/music/_design/whereabouts
+Authorization: Basic couch:couch
+Content-Type: application/json
+
+{
+  "language": "javascript",
+  "filters": {
+    "by_country": "function(doc,req){return doc.country===req.query.country;}"
+  }
+}
+```
+
+> ***Returned: 201 Created***
+>
+> ```json
+> {
+>   "ok": true,
+>   "id": "_design/whereabouts",
+>   "rev": "1-2d26b247332c44647add5630fcdbe236"
+> }
+> ```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/_changes?filter=whereabouts/by_country&country=RUS
+```
+
+> Very slow query! ~25s!
+
+
+***Query from replicated database***
+
+> I changed the access policy to public for `music-repl` manually via Fauxton after replication.
+
+```http
+GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/992aa69aef40256536a422d51e00ae7f
+```
+
+> ✅ Works (same)
+
+```http
+GET {{COUCH_ROOT_URL}}/music/992aa69aef40256536a422d51e00ae7f/?rev=10-bb7a81b3f30636cd49edf2053aeda613
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/992aa69aef40256536a422d51e00ae7f/?rev=10-bb7a81b3f30636cd49edf2053aeda613
+```
+
+> ❌ rev 10 doesn't exist in the replicated database
+
+
+***Creating conflicts***
+
+```http
+POST {{COUCH_ROOT_URL}}/music/
+Content-Type: application/json
+
+{
+  "_id": "myconflicts",
+  "name": "My Conflicts"
+}
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/myconflicts
+```
+
+> ***Response: 201 Created***
+>
+> ```json
+> {
+>   "ok": true,
+>   "id": "myconflicts",
+>   "rev": "1-62e0802f3f311fd5c164de7597c7811b"
+> }
+> ```
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/myconflicts
+```
+
+> Works after manual replication trigger
+>
+> ```json
+> {
+>   "_id": "myconflicts",
+>   "_rev": "1-62e0802f3f311fd5c164de7597c7811b",
+>   "name": "My Conflicts"
+> }
+> ```
+
+
+```http
+PUT {{COUCH_ROOT_URL}}/music-repl/myconflicts
+Content-Type: application/json
+
+{
+  "_id": "myconflicts",
+  "_rev": "1-62e0802f3f311fd5c164de7597c7811b",
+  "name": "My Conflicts",
+  "albums": ["Conflicts of Interest"]
+}
+```
+
+> ***Response: 201 Created***
+>
+> ```json
+> {
+>   "ok": true,
+>   "id": "myconflicts",
+>   "rev": "2-8acf7f0dfacdea569f710c681f8681e9"
+> }
+> ```
+
+```http
+PUT {{COUCH_ROOT_URL}}/music/myconflicts
+Content-Type: application/json
+
+{
+  "_id": "myconflicts",
+  "_rev": "1-62e0802f3f311fd5c164de7597c7811b",
+  "name": "My Conflicts",
+  "albums": ["Conflicting Opinions"]
+}
+```
+
+> ***Response: 201 Created***
+>
+> ```json
+> {
+>   "ok": true,
+>   "id": "myconflicts",
+>   "rev": "2-26ee14140578ccafb87f7a1c6fe386b8"
+> }
+> ```
+
+> Note the difference in `rev`
+
+After yet another replication...
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/myconflicts
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music/myconflicts
+```
+
+> ❓Last update (in `music`) didn't "win", i.e. not the same "conflict resolution" as described in the book
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/myconflicts?conflicts=true
+```
+
+> ***Response: 200 OK***
+>
+> ```json
+> {
+>   "_id": "myconflicts",
+>   "_rev": "2-8acf7f0dfacdea569f710c681f8681e9",
+>   "name": "My Conflicts",
+>   "albums": [
+>     "Conflicts of Interest"
+>   ],
+>   "_conflicts": [
+>     "2-26ee14140578ccafb87f7a1c6fe386b8"
+>   ]
+> }
+> ```
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/myconflicts?rev=2-26ee14140578ccafb87f7a1c6fe386b8
+```
+
+> ***Response: 200 OK
+>
+> ```json
+> {
+>   "_id": "myconflicts",
+>   "_rev": "2-26ee14140578ccafb87f7a1c6fe386b8",
+>   "name": "My Conflicts",
+>   "albums": [
+>     "Conflicting Opinions"
+>   ]
+> }
+> ```
+
+> (So both versions exist on the replicated side)
+
+### Homework
+
+* [Built-in Reduce Functions](https://docs.couchdb.org/en/stable/ddocs/ddocs.html#built-in-reduce-functions) are implemented in Erlang and run inside CouchDB, so they are much faster than the equivalent JavaScript functions.
+  * I noticed that my own reducer took a while so this seems useful
+  * Available: `_approx_count_distinct`, `_count`, `_stats`, `_sum`
+* In addition to custom (JS) filter functions (in design documents), the `_changes` API also enables ["filtering"](https://docs.couchdb.org/en/stable/api/database/changes.html#filtering) via:
+  * [`_doc_ids`](https://docs.couchdb.org/en/stable/api/database/changes.html#doc-ids) - query param of payload of [POST request](https://docs.couchdb.org/en/stable/api/database/changes.html#post--db-_changes)
+  * [`_selector`](https://docs.couchdb.org/en/stable/api/database/changes.html#selector) - significantly more efficient than using a JavaScript filter function and is the recommended option if filtering on document attributes only
+  * [`_design`](https://docs.couchdb.org/en/stable/api/database/changes.html#design) - only changes for any design document within the requested database
+  * [`_view`](https://docs.couchdb.org/en/stable/api/database/changes.html#view) - use existing map function as the filter
+  * There are two types of "replication", transient (legacy), via the [`_replicate` API](https://docs.couchdb.org/en/stable/api/server/common.html#replicate) and persistent via the [`_replicator` database](https://docs.couchdb.org/en/stable/replication/replicator.html#replicator-database)
+    * Both variants supports single and continuous replication (with filtering options etc)
+    * Cancellation of continuous replication done via a `POST`, similar to the setup but with field `"cancel": true`. For persistent replications cancellation can also be done by deleting the replication document.
+    * (Was it possible to configure _transient_ replication in Fauxton?)
+
+#### Watch changes continuously
+
+See [watchChangesContinuous.js](./watchChangesContinuous.js).
+
+In paralell:
+
+```shell
+node watchChangesContinuous.js music now
+```
+
+```shell
+node watchChangesLongpolling.js music now
+```
+
+> Make changes to Scooter document like above (when testing the _changes API)
+>
+> -> identical output
+>
+> But fetching _all_ changes (`since=0`) differs. Quick experiments with cURL shows that the order of the documents may differ (here and there). I.e.:
+>
+> ```shell
+> curl -s "http://localhost:5984/music/_changes?feed=continuous"
+> ```
+>
+> vs.
+>
+> ```shell
+> curl -s "http://localhost:5984/music/_changes?feed=longpoll"
+> ```
+
+#### View for conflicting revisions
+
+In `music-repl`, create design document "status" and view "conflicts" with the following map function:
+
+```js
+function (doc) {
+  if (doc._conflicts) {
+    for (const rev of doc._conflicts) {
+      emit(doc._id, rev)
+    }
+  }
+}
+```
+
+```http
+GET {{COUCH_ROOT_URL}}/music-repl/_design/status/_view/conflicts
+```
+
+> ***Response: 200 OK***
+>
+> ```json
+> {
+>   "total_rows": 2,
+>   "offset": 0,
+>   "rows": [
+>     {
+>       "id": "myconflicts",
+>       "key": "myconflicts",
+>       "value": "2-26ee14140578ccafb87f7a1c6fe386b8"
+>     },
+>     {
+>       "id": "theconflicts",
+>       "key": "theconflicts",
+>       "value": "2-ba76584b2d0226f5849251b4f5aaed87"
+>     }
+>   ]
+> }
+> ```
+
+(Somewhat unclear what the task was... why "map to doc _id"? The id is returned anyway)
