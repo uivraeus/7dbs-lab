@@ -264,7 +264,147 @@ aws dynamodb update-item --table-name ShoppingCart \
   --return-values ALL_NEW
 ```
 
+## Notes from Day 2
+
+* Don't understand the "Getting Our Keys Right" section!
+  * Long argument for a random `ReadingId` attribute (w/o range key)... 
+  * Then something completely opposite in the actual definition
+* LSB share/re-use HASH key from Key Schema (SensorId)
+* Nice to use json files instead of very long argument strings to `aws` CLI.
 
 
+### Scratch pad
+
+> Delete stuff from Day 1
+>
+> ```shell
+> aws dynamodb delete-table --table-name Book
+> aws dynamodb delete-table --table-name ShoppingCart
+> ```
+
+```shell
+aws dynamodb create-table --cli-input-json file://sensor-data-table.json
+```
+
+```shell
+export STREAM_NAME=temperature-sensor-data
+aws kinesis create-stream \
+  --stream-name ${STREAM_NAME} \
+  --shard-count 1
+```
+
+```shell
+aws kinesis describe-stream --stream-name ${STREAM_NAME}
+```
+
+```shell
+aws kinesis put-record \
+  --stream-name ${STREAM_NAME} \
+  --partition-key sensor-data \
+  --data $(echo -n "Baby's first Kinesis record" | base64)
+```
+
+> I had to add base64 encoding. The command in the book returned _"nvalid base64: "Baby's first Kinesis record""_
+
+```shell
+export IAM_ROLE_NAME=kinesis-lambda-dynamodb
+
+aws iam create-role \
+  --role-name ${IAM_ROLE_NAME} \
+  --assume-role-policy-document file://lambda-kinesis-role.json
+
+aws iam attach-role-policy \
+  --role-name ${IAM_ROLE_NAME} \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
+
+aws iam attach-role-policy \
+  --role-name ${IAM_ROLE_NAME} \
+  --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+```
+
+```shell
+aws iam get-role --role-name ${IAM_ROLE_NAME}
+```
+
+```shell
+export ROLE_ARN=$(aws iam get-role --role-name ${IAM_ROLE_NAME} | jq -r '.Role.Arn')
+```
+
+```shell
+zip ProcessKinesisRecords.zip ProcessKinesisRecords.js 
+
+aws lambda create-function \
+  --region eu-north-1 \
+  --function-name ProcessKinesisRecords \
+  --zip-file fileb://ProcessKinesisRecords.zip \
+  --role ${ROLE_ARN} \
+  --handler ProcessKinesisRecords.kinesisHandler \
+  --runtime nodejs18.x
+```
+
+> The book's "nodejs6.10" isn't supported any longer (not that surprising)
+
+Updates are done (after re-zipping) using:
+
+```shell
+aws lambda update-function-code \
+  --function-name ProcessKinesisRecords \
+  --zip-file fileb://ProcessKinesisRecords.zip
+```
+
+```shell
+aws lambda invoke \
+  --invocation-type RequestResponse \
+  --function-name ProcessKinesisRecords \
+  --payload file://test-lambda-input.base64 \
+  lambda-output.txt
+```
+
+> Again, I had to convert to base64 encoding as the book's syntax didn't work
+
+> Also, the code's js-file didn't work so I had to adjust it. On the first attempt I got the following error:
+>
+>> _"Error: Cannot find module 'aws-sdk'\nRequire stack:\n- /var/task/ProcessKinesisRecords.js\n- /var/runtime/index.mjs"_
+>
+> Now I use ["v3 of the AWS SDK"](https://aws.amazon.com/blogs/developer/why-and-how-you-should-use-aws-sdk-for-javascript-v3-on-node-js-18/)
 
 
+```shell
+export KINESIS_STREAM_ARN?$(aws kinesis describe-stream --stream-name ${STREAM_NAME} | jq -s '.StreamDescription.StreamARN')
+
+aws lambda create-event-source-mapping \
+  --function-name ProcessKinesisRecords \
+  --event-source-arn ${KINESIS_STREAM_ARN} \
+  --starting-position LATEST
+```
+
+```shell
+aws lambda list-event-source-mappings
+```
+
+```shell
+export DATA=$(
+  echo '{
+    "sensor_id":"sensor-1",
+    "temperature":99.7,
+    "current_time":123456790
+  }' | base64 -w0
+)
+
+aws kinesis put-record \
+ --stream-name ${STREAM_NAME} \
+ --partition-key sensor-data \
+ --data $DATA
+```
+
+```shell
+aws dynamodb scan --table-name SensorData
+```
+
+### Homework
+
+* See Day 1's notes on the [DynamoDB Streams docs](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
+  * Possible use-case; react on updates to the database 
+* Tried out Python and [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
+  * see [python-app](./python-app/README.md)
+  
