@@ -370,7 +370,7 @@ aws lambda invoke \
 
 
 ```shell
-export KINESIS_STREAM_ARN?$(aws kinesis describe-stream --stream-name ${STREAM_NAME} | jq -s '.StreamDescription.StreamARN')
+export KINESIS_STREAM_ARN=$(aws kinesis describe-stream --stream-name ${STREAM_NAME} | jq -r '.StreamDescription.StreamARN')
 
 aws lambda create-event-source-mapping \
   --function-name ProcessKinesisRecords \
@@ -407,4 +407,82 @@ aws dynamodb scan --table-name SensorData
   * Possible use-case; react on updates to the database 
 * Tried out Python and [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
   * see [python-app](./python-app/README.md)
-  
+* [TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) enables automatic deletion of items when they are not relevant any longer. E.g. Put item "concert ticket" with TTL set to time-until-concert (system will automatically delete the item within a few days after expiration).
+
+#### Kinesis and partitioning
+
+General overview of concepts shown in this [High-Level Architecture](https://docs.aws.amazon.com/streams/latest/dev/key-concepts.html) description. There are _partition keys_ which control which _shard_ and data record is written to. Each shard can support a fixed unit of capacity, e.g. up to 5 transactions per second for reads, up to a maximum total data read rate of 2 MB per second etc. Thus, to increase capacity for a _stream_, more shards are required.
+
+For our example system, we could use the value of `sensor_id` as the partition key.
+
+
+#### Extend pipeline with _humidity_ readings
+
+> I deleted all tables, streams etc. from Day 2 before running these commands
+
+```shell
+export STREAM_NAME=temperature-sensor-data
+export IAM_ROLE_NAME=kinesis-lambda-dynamodb
+
+aws dynamodb create-table --cli-input-json file://sensor-data-table-extended.json
+
+aws kinesis create-stream \
+  --stream-name ${STREAM_NAME} \
+  --shard-count 1
+
+export KINESIS_STREAM_ARN=$(aws kinesis describe-stream --stream-name ${STREAM_NAME} | jq -r '.StreamDescription.StreamARN')
+
+aws iam create-role \
+  --role-name ${IAM_ROLE_NAME} \
+  --assume-role-policy-document file://lambda-kinesis-role.json
+
+aws iam attach-role-policy \
+  --role-name ${IAM_ROLE_NAME} \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
+
+aws iam attach-role-policy \
+  --role-name ${IAM_ROLE_NAME} \
+  --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+export ROLE_ARN=$(aws iam get-role --role-name ${IAM_ROLE_NAME} | jq -r '.Role.Arn')
+
+zip ProcessKinesisRecordsExtended.zip ProcessKinesisRecordsExtended.mjs 
+
+aws lambda create-function \
+  --region eu-north-1 \
+  --function-name ProcessKinesisRecordsExtended \
+  --zip-file fileb://ProcessKinesisRecordsExtended.zip \
+  --role ${ROLE_ARN} \
+  --handler ProcessKinesisRecordsExtended.kinesisHandler \
+  --runtime nodejs18.x
+
+aws lambda invoke \
+  --invocation-type RequestResponse \
+  --function-name ProcessKinesisRecordsExtended \
+  --payload file://test-lambda-input-extended.base64 \
+  lambda-output.txt
+
+aws lambda create-event-source-mapping \
+  --function-name ProcessKinesisRecordsExtended \
+  --event-source-arn ${KINESIS_STREAM_ARN} \
+  --starting-position LATEST
+
+export DATA=$(
+  echo '{
+    "sensor_id":"sensor-1",
+    "temperature":99.7,
+    "humidity":71.2,
+    "current_time":123456790
+  }' | base64 -w0
+)
+
+aws kinesis put-record \
+ --stream-name ${STREAM_NAME} \
+ --partition-key sensor-data \
+ --data $DATA
+
+aws dynamodb scan --table-name SensorData
+```
+
+> Deleted all created resources afterward
+

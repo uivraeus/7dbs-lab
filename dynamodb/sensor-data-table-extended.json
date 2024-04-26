@@ -1,0 +1,69 @@
+{
+  "TableName": "SensorData",
+  "KeySchema": [
+    {
+      "AttributeName": "SensorId",
+      "KeyType": "HASH"
+    },
+    {
+      "AttributeName": "CurrentTime",
+      "KeyType": "RANGE"
+    }
+  ],
+  "AttributeDefinitions": [
+    {
+      "AttributeName": "SensorId",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "CurrentTime",
+      "AttributeType": "N"
+    },
+    {
+      "AttributeName": "Temperature",
+      "AttributeType": "N"
+    },
+    {
+      "AttributeName": "Humidity",
+      "AttributeType": "N"
+    }
+  ],
+  "LocalSecondaryIndexes": [
+    {
+      "IndexName": "TemperatureIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "SensorId",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "Temperature",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "HumidityIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "SensorId",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "Humidity",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    }
+  ],
+  "ProvisionedThroughput": {
+    "ReadCapacityUnits": 1,
+    "WriteCapacityUnits": 1
+  }
+}
