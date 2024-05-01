@@ -484,5 +484,157 @@ aws kinesis put-record \
 aws dynamodb scan --table-name SensorData
 ```
 
-> Deleted all created resources afterward
+> Deleted all created resources afterward (but recreated them again later on for Day3)
 
+## Notes from Day 3
+
+* Not so much "DynamoDB" - more of a "Tour de AWS"
+* Alternatives / other options for enabling "SQL" without first duplicating DynamoDB tables in S3
+  * [PartiQL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ql-reference.html) directly against DynamoDB
+    * But this [blog article](https://medium.com/@saswat.sahoo.1988/combine-the-simplicity-of-sql-with-the-power-of-nosql-pt-1-9ea0c298038b) highlights the limitations and important considerations.
+  * [Athena Federated Query](https://docs.aws.amazon.com/athena/latest/ug/connect-to-a-data-source.html), which manage accesses to DynamoDB via implicit Lambda
+    * Concept described in this [blog article](https://medium.com/@saswat.sahoo.1988/combine-the-simplicity-of-sql-with-the-power-of-nosql-pt-2-cff1c524297e)
+    * I tested this - see the scratch pad notes below
+    * "OK" query times (couple of seconds)
+* The book's solution for running the [Data Pipeline](https://docs.aws.amazon.com/datapipeline/latest/DeveloperGuide/what-is-datapipeline.html) and then (manually) remove some auto-generated files from the S3 bucket to not interfere with Athena doesn't feel right and seems deprecated
+  * _"AWS Data Pipeline service can now be accessed only through the API and CLI. AWS Data Pipeline is in maintenance mode and we are not planning to expand the service to new regions"_
+  * Was it ever feasible when pipeline runs automatically/periodically?
+* Can [DynamoDB table exports](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport_Requesting.html) be an alternative to "Data Pipelines"?
+  * Requires enabling of [Point-in-time recovery PITR](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery_Howitworks.html)
+  * Experiment resulted in a sub-folder with a "gz-file" ... probably not fit for direct queries from Athena (I think)
+
+### Scratch pad
+
+> Ran all steps with the "Homework's humidity readings" covered already from the start
+>
+> * Recreate tables, streams and lambdas from Day2's homework (run those commands again)
+
+
+```shell
+gem install random-walk
+gem install aws-sdk
+```
+
+> According to [the docs](https://github.com/aws/aws-sdk-ruby) I should have installed/used the "kinesis only" variant instead
+>
+> * It would have saved me quite some installation time (and space)
+> * `after 406 seconds, 390 gems installed`
+
+After getting error messages from some part of the AWS SDK I also had to install something to handle XML:
+
+```shell
+gem install rexml
+```
+
+```shell
+ruby upload-sensor-data-extended.rb temp-sensor-1 10
+```
+
+```shell
+for n in {1..10}; do
+  ruby upload-sensor-data-extended.rb sensor-x${n} 1000 &
+done
+```
+
+> Looked good for a while but then all lambda invocations started to fail. Rate-limitation somewhere in my pipeline?
+>
+>> `ProvisionedThroughputExceededException: The level of configured provisioned throughput for the table was exceeded. Consider increasing your provisioning level with the UpdateTable API.`
+>
+> In the console's DynamoDB metrics I can see that I over-consume _writes_ 
+>
+> I guess it's crucial to balance the capacity of the steps in the pipeline. Otherwise I will execute a lot of Lambdas (that take longer time) without being able to store the result in the DB (don't know if data was dropped ... I think it was)
+
+After 5+ minutes:
+
+```shell
+pgrep -f upload-sensor-data-extended | xargs kill -9
+```
+
+Stats from the AWS console's Lambda (CloudWatch) logs:
+
+| Timestamp                | RequestId                            | LogStream                                            | DurationInMS | BilledDurationInMS | MemorySetInMB | MemoryUsedInMB |
+|--------------------------|--------------------------------------|------------------------------------------------------|--------------|--------------------|---------------|----------------|
+| 2024-05-01T14:50:08.290Z | ef82fc75-c4f3-49e5-a012-200262b497e7 | 2024/05/01/[$LATEST]1b4dd308d26945f9b935e290110108e1 |        19.73 |               20.0 |         128.0 |           88.0 |
+| 2024-05-01T14:50:05.290Z | 691d5ebf-9de8-4460-8efe-6003995de186 | 2024/05/01/[$LATEST]1b4dd308d26945f9b935e290110108e1 |        35.31 |               36.0 |         128.0 |           88.0 |
+| 2024-05-01T14:50:04.272Z | dd5274e4-4415-4058-872f-147608b3f0ae | 2024/05/01/[$LATEST]1b4dd308d26945f9b935e290110108e1 |        15.6  |               16.0 |         128.0 |           88.0 |
+|             :            |                   :                  |                           :                          |       :      |           :        |        :      |        :       |
+
+```shell
+T1=$(aws dynamodb scan --table-name SensorData --query Items[0].CurrentTime.N | tr -d '"')
+T2=$(aws dynamodb scan --table-name SensorData --query Items[200].CurrentTime.N | tr -d '"')
+
+aws dynamodb query --table-name SensorData --expression-attribute-values "{
+  \":t1\": {\"N\": \"$T1\"},
+  \":t2\": {\"N\": \"$T2\"},
+  \":sensorId\": {\"S\": \"sensor-x1\"}
+}" \
+--key-condition-expression \
+  'SensorId = :sensorId AND CurrentTime BETWEEN :t1 AND :t2' \
+--projection-expression 'Temperature,Humidity'
+```
+
+```shell
+aws dynamodb scan --table-name SensorData --query Count
+```
+
+> 344 ... Restart sensor data generator and let it run until there are more than 1000 entries
+
+```shell
+export BUCKET_1_NAME=s3://uivraeus-7dbs-sensor-data-1
+aws s3 mb ${BUCKET_1_NAME}
+```
+
+Tried to setup a Data Pipeline... But I got this message in the AWS Console:
+
+> **Region Unsupported**
+>
+> Data Pipeline is not available in Europe (Stockholm). Please select another region.
+
+How annoying!
+
+When trying to pick another region (Europe/Ireland) I get this message:
+
+_"AWS Data Pipeline service can now be accessed only through the API and CLI. AWS Data Pipeline is in maintenance mode and we are not planning to expand the service to new regions"_
+
+OK, scrap that plan!
+
+Plan B... Enable PITR and run an "Export to S3" from the AWS console. But I couldn't do it for my 1000+ entries that were written before I enabled PITR (so I had to write some more entries)
+
+After some time (longer than I expected) the export completed. But it resulted in a "folder" in the bucket with a gz-file in it (in addition to various meta data). Don't think Athena can query against that (or at least, I don't have time to investigate that now).
+
+Plan C... Skip the bucket and query against DynamoDB directly from Athena using [Athena Federated Query](https://docs.aws.amazon.com/athena/latest/ug/connect-to-a-data-source.html).
+
+
+After some web GUI click-ops, creating connectors, lambdas and "spill bucket" (`s3://uivraeus-7dbs-spill-bucket`), I finally managed to run some queries from the Athena query editor
+
+Most queries took a couple of seconds to complete (with ~1300 entries in the database).
+
+```sql
+SELECT DISTINCT SensorId FROM sensordata;
+```
+
+```sql
+SELECT COUNT(*) AS NumberOfReadings FROM sensordata
+WHERE SensorId = 'sensor-x1';
+```
+
+```sql
+SELECT AVG(Temperature) AS AverageTemp FROM sensordata
+WHERE SensorId = 'sensor-x2';
+```
+
+```sql
+SELECT AVG(Temperature) AS AverageTempAllSensors FROM sensordata;
+```
+
+```sql
+SELECT AVG(Humidity) AS AverageHumidAllSensors FROM sensordata;
+```
+
+```sql
+SELECT MAX(Temperature) AS MaxTemp FROM sensordata;
+```
+
+```sql
+SELECT STDDEV(Temperature) AS StdDev FROM sensordata;
+```
