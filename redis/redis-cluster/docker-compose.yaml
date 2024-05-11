@@ -1,0 +1,24 @@
+services:
+  redis-master:
+    image: redis:latest
+    # volumes:
+    #   - "redis-master_data:/data"
+    networks:
+      - devcontainer_network  
+
+  redis-slave:
+    image: redis:latest
+    command: "redis-server --slaveof redis-master 6379"
+    # volumes:
+    #   - "redis-slave_data:/data"
+    networks:
+      - devcontainer_network  
+
+# volumes:
+#   redis-master_data:
+#   redis-slave_data: 
+
+networks:
+  devcontainer_network:
+    name: 7dbs_devcontainer_default
+    external: true
