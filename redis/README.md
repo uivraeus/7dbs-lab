@@ -423,3 +423,76 @@ Number of false positives: 2393
   * Macro-level capabilities: Monitoring, Notification, Automatic (master) failover, Configuration provider.
 
 (Won't do the "Do"s)
+
+## Notes from Day 3
+
+* `KEYS bands:*` - wildcard lookups, didn't get that from day 1 and 2 - now naming patterns makes more sense.
+
+### Scratch pad
+
+Use `day3/` as a package directory
+
+```shell
+npm init
+```
+
+```shell
+npm install redis csv-parser
+```
+
+> Should maybe use `csv-parse` instead of `csv-parser` as it works with ESM and is more commonly used these days (but) I didn't have the time to rewrite the logic (too much) 
+>
+> Can't install `hiredis` and `cradle` comes with several warnings (abandoned projects? 8 years since they were updated)
+>
+> Maybe I can use [`couchdb-nano`](https://github.com/apache/couchdb-nano) instead?
+>
+> ```shell
+> npm install nano
+> ``` 
+
+
+```console
+$ node populateCouch.js
+Bands Loaded: 1000
+Bands Loaded: 2000
+Bands Loaded: 3000
+Bands Loaded: 4000
+Bands Loaded: 5000
+Bands Loaded: 6000
+Bands Loaded: 7000
+Warning: Skipping band !!!, can't derive ID
+populateCouch.js:113
+Bands Loaded: 8000
+Bands Loaded: 9000
+Bands Loaded: 10000
+Bands Loaded: 11000
+Bands Loaded: 12000
+Bands Loaded: 13000
+Bands Loaded: 14000
+Bands Loaded: 15000
+Bands Loaded: 16000
+Bands Loaded: 17000
+Bands Loaded: 18000
+Bands Loaded: 19000
+Bands Loaded: 20000
+Bands Loaded: 21000
+Bands Loaded: 22000
+Warning: Skipping band +\\-, can't derive ID
+populateCouch.js:113
+Bands Loaded: 23000
+Bands Loaded: 24000
+Bands Loaded: 25000
+Bands Loaded: 26000
+Bands Loaded: 27000
+Bands Loaded: 28000
+Bands Loaded: 29000
+Bands Loaded: 30000
+Bands Loaded: 31000
+Bands Loaded: 32000
+Bands Loaded: 33000
+Bands Loaded: 34000
+Bands Loaded: 35000
+Warning: Skipping band +/-, can't derive ID
+populateCouch.js:113
+Bands Loaded: 36000
+```
